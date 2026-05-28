@@ -8,10 +8,14 @@ Anything below 1.2 is intent, not commitment.
 - Two primitives running end-to-end: memory persistence (consolidation,
   source receipts, working memory) and attention (proactive scan, morning
   brief, calendar imminent).
-- 13 Edge Functions covering capture, memory, conversation, connectors,
+- 17 Edge Functions covering capture, memory, conversation, connectors,
   push.
 - Apple Calendar via EventKit. No other connectors.
 - One conversation per user, ever (DB-enforced).
+- Conversation tool-use loop for low-risk substrate actions, with audit
+  receipts persisted on assistant messages.
+- Working-memory golden-set eval harness for source receipts, quiet-item
+  age, voice drift, and structural regressions.
 - Forward-compatible vector(1024) columns; no semantic retrieval at
   runtime.
 
@@ -21,10 +25,9 @@ Anything below 1.2 is intent, not commitment.
   is gated until the crisis-content sub-brief lands. Drift surfaces
   emotional patterns ("you've been quiet about Susanna for 9 days"), so
   the prompt design has higher stakes than any other category.
-- **Tool use in conversation.** Lila acts inside the thread — marks a
-  task resolved, schedules a reflection, snoozes a quiet item — instead
-  of just describing what to do. Anthropic SDK already supports this;
-  the wrapping is what's missing.
+- **Tool use expansion.** The loop exists for low-risk substrate verbs.
+  Next is undo, snooze, richer update summaries, and eval coverage for
+  tool-selection mistakes.
 - **Google Calendar OAuth.** First non-Apple connector. Reuses the
   `events` table and the existing reconciliation pattern. The OAuth
   exchange lives in a new `connectors-google-calendar-*` function tree.

@@ -10,6 +10,7 @@
     "wm:consolidate:all": "tsx scripts/working-memory-consolidate-all.ts",
     "gcal:sync": "tsx scripts/gcal-sync.ts",
     "gcal:oauth:mint": "tsx scripts/gcal-oauth-mint.ts",
+    "eval:wm": "tsx src/eval/run-working-memory.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

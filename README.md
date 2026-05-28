@@ -11,6 +11,9 @@ For the full thinking behind this project, see [`MANIFESTO.md`](./MANIFESTO.md).
 For a concrete look at what the system produces, see
 [`WORKING_MEMORY_EXAMPLE.md`](./WORKING_MEMORY_EXAMPLE.md). For the
 implementation deep-dive, see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+For the production hardening path, see
+[`PRODUCTION_READINESS.md`](./PRODUCTION_READINESS.md) and
+[`EVALS.md`](./EVALS.md).
 
 [lila.sh](https://lila.sh) is this engine. [lila.surf](https://lila.surf)
 is the consumer iOS app — the reference surface — built on top of it.
@@ -103,6 +106,7 @@ src/                                   Two primitives, named.
   attention/                           Noticing, scheduling, proactive surfacing. Runtime lives in supabase/functions/proactive-*; this directory documents the conceptual home.
   connectors/                          External-system bridges (Google Calendar — deferred to 1.1).
 scripts/                               Local CLI helpers — `wm:consolidate*`. Useful for prompt-tuning.
+src/eval/                              Golden-set checks for working-memory regressions.
 ADR/                                   Architecture Decision Records — short writeups of non-obvious choices.
 ```
 
@@ -140,6 +144,18 @@ Each bullet carries `source_ids: [{table, id}, …]` — the receipts the
 iOS tap-to-expand sheet resolves against the underlying source rows.
 A reader can always trace a surfaced bullet back to the captures it
 came from. See [`WORKING_MEMORY_EXAMPLE.md`](./WORKING_MEMORY_EXAMPLE.md).
+
+## Evals
+
+Working-memory regressions are checked with a deterministic golden set:
+
+```bash
+npm run eval:wm
+```
+
+The evaluator catches missing or hallucinated receipts, too-fresh quiet
+items, second-person copy, banned voice phrases, structural drift, and
+scenario-specific expectations. See [`EVALS.md`](./EVALS.md).
 
 ## Connectors in 1.0
 
