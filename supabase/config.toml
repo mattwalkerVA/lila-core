@@ -22,6 +22,8 @@ verify_jwt = true
 verify_jwt = true
 [functions.memory-refresh]
 verify_jwt = true
+[functions.memory-retrieve]
+verify_jwt = true
 [functions.memory-proactive-scan]
 verify_jwt = true
 [functions.conversation-send]

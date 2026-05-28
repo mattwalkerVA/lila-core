@@ -5,6 +5,7 @@ import { workingMemoryGoldenCases } from './golden/working-memory.js'
 describe('working-memory eval harness', () => {
   it('passes the committed golden cases', () => {
     const reports = evaluateSuite(workingMemoryGoldenCases)
+    expect(workingMemoryGoldenCases.length).toBeGreaterThanOrEqual(30)
     expect(reports.every((report) => report.passed)).toBe(true)
   })
 
@@ -36,5 +37,24 @@ describe('working-memory eval harness', () => {
 
     expect(report.passed).toBe(false)
     expect(report.findings.some((finding) => finding.message.includes('minimum is 10'))).toBe(true)
+  })
+
+  it('catches hallucinated dates', () => {
+    const testCase = structuredClone(workingMemoryGoldenCases[0])
+    testCase.output.focus_items[0]!.text = 'The Anthropic cover letter still turns on paragraph two before Monday.'
+
+    const report = evaluateWorkingMemory(testCase)
+
+    expect(report.passed).toBe(false)
+    expect(report.findings.some((finding) => finding.message.includes('temporal reference'))).toBe(true)
+  })
+
+  it('warns on generic copy', () => {
+    const testCase = structuredClone(workingMemoryGoldenCases[0])
+    testCase.output.focus_items[0]!.text = 'The project still needs something before Friday.'
+
+    const report = evaluateWorkingMemory(testCase)
+
+    expect(report.findings.some((finding) => finding.message.includes('generic copy'))).toBe(true)
   })
 })

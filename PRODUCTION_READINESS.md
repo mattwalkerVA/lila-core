@@ -14,12 +14,15 @@ first, attention second, surface polish only where it makes those two visible.
 
 ## P1 — Trust And Evals
 
-- Working-memory golden set runs in CI with `npm run eval:wm`.
+- Working-memory golden set has 30 deterministic cases and runs locally with
+  `npm run eval:wm`.
 - Prompt/model changes require a before/after eval note.
 - `consolidation_runs` stores prompt version, model id, latency, tokens,
-  parse status, and eval score.
-- Source-expansion UI becomes "why this surfaced": original capture, shaped
-  row, last touched date, and related memories.
+  output, input hash, and parse status. Eval score is the next CI-backed
+  addition.
+- Source-expansion UI is now "why this surfaced" and can resolve receipts
+  across captures, tasks, notes, reflections, messages, events, bookmarks,
+  memories, and conversation history.
 - Conversation tool calls get undo affordances for low-risk substrate edits.
 
 ## P2 — Memory v2
@@ -27,8 +30,8 @@ first, attention second, surface polish only where it makes those two visible.
 Do not start with GraphRAG. Start with boring context engineering:
 
 - Backfill embeddings into existing `vector(1024)` columns.
-- Add lexical search over captures, tasks, notes, reflections, memories, and
-  conversation messages.
+- Add lexical search over captures, tasks, notes, reflections, messages,
+  bookmarks, memories, events, and conversation messages.
 - Add adaptive routing in `conversation-send`:
   - fast path: working memory + recent thread;
   - recall path: lexical/vector retrieval + source receipts;
@@ -36,6 +39,10 @@ Do not start with GraphRAG. Start with boring context engineering:
 - Add recall evals before adding a reranker.
 - Add reranking only when `recall@50` is high and `context_precision@10` is
   weak.
+
+Current state: lexical retrieval and `memory_accesses` audit logging are wired
+behind `LILA_MEMORY_RETRIEVAL_ENABLED`; vector backfill is scripted but should
+run only after the embedding provider and rate limits are confirmed.
 
 ## P3 — The Product Gets Strange In The Right Way
 

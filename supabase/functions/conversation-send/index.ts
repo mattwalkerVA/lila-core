@@ -22,10 +22,13 @@ import { withErrorHandling } from '../_shared/http.ts'
 import { anthropic, MODELS } from '../_shared/client.ts'
 import { conversationSystem, renderConversationContext } from '../_shared/prompts/conversation.ts'
 import { TOOL_SPECS, executeTool } from '../_shared/tools/index.ts'
+import { renderRetrievedMemoryContext, retrieveMemory } from '../_shared/retrieval.ts'
 
 interface Body { content: string }
 
 const MAX_TURNS = 5
+const MEMORY_RETRIEVAL_ENABLED = Deno.env.get('LILA_MEMORY_RETRIEVAL_ENABLED') === 'true'
+const MEMORY_RETRIEVAL_MIN_MESSAGES = Number(Deno.env.get('LILA_MEMORY_RETRIEVAL_MIN_MESSAGES') ?? '20')
 
 interface ToolCallLog {
   id: string
@@ -57,12 +60,14 @@ Deno.serve(withErrorHandling(async (req) => {
     conversationId = created.id
   }
 
-  // Persist the user message immediately.
-  await sb.from('conversation_messages').insert({
+  // Persist the user message immediately. We keep the id so retrieval audit
+  // rows can point at the turn that pulled old context back in.
+  const { data: userMessage, error: userMessageError } = await sb.from('conversation_messages').insert({
     conversation_id: conversationId,
     role: 'user',
     content: body.content,
-  })
+  }).select('id').single()
+  if (userMessageError) throw new HttpError(500, `user message insert failed: ${userMessageError.message}`)
 
   // Load context: profile, working memory, last 20 messages, possibly an anchor.
   const [{ data: profile }, { data: wm }, { data: history }] = await Promise.all([
@@ -85,12 +90,31 @@ Deno.serve(withErrorHandling(async (req) => {
     }
   }
 
+  let retrievedMemoryContext = ''
+  let retrievedSourceIds: Array<{ table: string; id: string }> = []
+  if (MEMORY_RETRIEVAL_ENABLED && recent.length >= MEMORY_RETRIEVAL_MIN_MESSAGES) {
+    try {
+      const retrieved = await retrieveMemory({
+        userId,
+        query: body.content,
+        limit: 8,
+        reason: 'conversation_send',
+        conversationMessageId: userMessage?.id ?? null,
+      })
+      retrievedMemoryContext = renderRetrievedMemoryContext(retrieved)
+      retrievedSourceIds = retrieved.map((r) => ({ table: r.source_table, id: r.source_id }))
+    } catch (err) {
+      console.error('conversation retrieval failed:', err)
+    }
+  }
+
   const systemPrompt = conversationSystem(firstName)
-  const contextBlock = renderConversationContext({
+  const baseContextBlock = renderConversationContext({
     workingMemory: wm ?? null,
     anchorBulletId: lastAnchor?.anchor_bullet_id ?? null,
     anchorSources,
   })
+  const contextBlock = [baseContextBlock, retrievedMemoryContext].filter(Boolean).join('\n\n')
 
   // Build the messages array for the API. The first user message contains
   // the rendered context block; subsequent messages are the actual thread.
@@ -196,17 +220,17 @@ Deno.serve(withErrorHandling(async (req) => {
         // retrieval). When the user just tapped a focus-item bullet, we
         // copy the anchor's source_ids onto the assistant message so the
         // iOS client can render tappable receipts under the reply.
-        const carriedSourceIds = lastAnchor?.source_ids ?? null
+        const carriedSourceIds = mergeSourceIds(lastAnchor?.source_ids ?? [], retrievedSourceIds)
         const { data: saved } = await sb.from('conversation_messages').insert({
           conversation_id: conversationId,
           role: 'assistant',
           content: assistantBuffer,
-          source_ids: carriedSourceIds,
+          source_ids: carriedSourceIds.length > 0 ? carriedSourceIds : null,
           tool_calls: toolCallsLog.length > 0 ? toolCallsLog : null,
         }).select('id').single()
         enqueue('done', {
           id: saved?.id ?? null,
-          source_ids: carriedSourceIds ?? [],
+          source_ids: carriedSourceIds,
           tool_calls: toolCallsLog,
           stop_reason: stopReason,
         })
@@ -229,3 +253,18 @@ Deno.serve(withErrorHandling(async (req) => {
     },
   })
 }))
+
+function mergeSourceIds(...groups: Array<Array<{ table: string; id: string }>>): Array<{ table: string; id: string }> {
+  const seen = new Set<string>()
+  const out: Array<{ table: string; id: string }> = []
+  for (const group of groups) {
+    for (const source of group) {
+      if (!source?.table || !source?.id) continue
+      const key = `${source.table}:${source.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({ table: source.table, id: source.id })
+    }
+  }
+  return out
+}

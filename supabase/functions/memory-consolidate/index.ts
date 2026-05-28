@@ -24,6 +24,7 @@ interface Body {
 }
 
 const DEFAULT_LOOKBACK = 7
+const CONSOLIDATION_PROMPT_VERSION = 'wm-consolidation-2026-05-28'
 
 Deno.serve(withErrorHandling(async (req) => {
   const body = await readJson<Body>(req).catch(() => ({} as Body))
@@ -50,6 +51,9 @@ Deno.serve(withErrorHandling(async (req) => {
   let success = false
   let error: string | null = null
   let usage = { input_tokens: 0, output_tokens: 0 }
+  let inputHash: string | null = null
+  let output: Record<string, unknown> | null = null
+  let parseSuccess = false
 
   try {
     const profile = await loadProfile(userId)
@@ -69,6 +73,12 @@ Deno.serve(withErrorHandling(async (req) => {
       todayEvents: inputs.upcomingEvents,
     })
 
+    inputHash = await sha256Hex(JSON.stringify({
+      prompt_version: CONSOLIDATION_PROMPT_VERSION,
+      system: sys,
+      user: usr,
+    }))
+
     const response = await anthropic.messages.create({
       model: MODELS.sonnet,
       max_tokens: 2048,
@@ -83,6 +93,8 @@ Deno.serve(withErrorHandling(async (req) => {
       people_threads: any[]
       quiet_items: any[]
     }>(text)
+    parseSuccess = true
+    output = parsed as Record<string, unknown>
 
     // Upsert working_memory (one row per user).
     const sb = scopedSupabase(userId)
@@ -115,6 +127,11 @@ Deno.serve(withErrorHandling(async (req) => {
       tokens_out: usage.output_tokens,
       success,
       error,
+      prompt_version: CONSOLIDATION_PROMPT_VERSION,
+      model_id: MODELS.sonnet,
+      input_hash: inputHash,
+      output,
+      parse_success: parseSuccess,
     })
   }
 }))
@@ -187,4 +204,10 @@ async function triggerProactiveScan(userId: string, workingMemory: any, recentAc
     },
     body: JSON.stringify({ user_id: userId, working_memory: workingMemory, recent_activity: recentActivity }),
   })
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('')
 }

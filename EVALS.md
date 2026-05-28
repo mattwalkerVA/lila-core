@@ -16,7 +16,7 @@ Run:
 npm run eval:wm
 ```
 
-This executes deterministic golden cases in
+This executes the 30-case deterministic golden set in
 [`src/eval/golden/working-memory.ts`](./src/eval/golden/working-memory.ts)
 against the evaluator in
 [`src/eval/working-memory.ts`](./src/eval/working-memory.ts).
@@ -30,6 +30,8 @@ The evaluator checks:
 - no second-person home-screen copy;
 - banned voice phrases and corporate language;
 - quiet items are at least 10 days old;
+- hallucinated temporal references that did not appear in the source context;
+- generic assistant-y copy that makes the home screen feel fake;
 - scenario-specific expectations, such as required focus phrases and required
   source receipts.
 
@@ -60,10 +62,11 @@ Before 1.0 App Store submission:
 - Any manual prompt/model test that fails gets reduced into a golden case
   before the prompt is edited again.
 
-Before Memory v2:
+Before Memory v2 is enabled broadly:
 
 - Add retrieval recall checks: every retrieved source in a golden query must
   be present by `recall@20`.
 - Add context precision checks after reranking lands.
-- Track prompt version, model id, latency, token count, parse success, and eval
-  score for every consolidation run.
+- Track prompt version, model id, latency, token count, and parse success for
+  every consolidation run. The migration adds prompt/output fields; eval score
+  should land once CI runs this harness on every prompt change.

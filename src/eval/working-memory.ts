@@ -50,6 +50,8 @@ const BANNED_PHRASES = [
 ]
 
 const SECOND_PERSON = /\b(you|your|yours|yourself)\b/i
+const TEMPORAL_TOKEN = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|\d{4}-\d{2}-\d{2})\b/ig
+const GENERIC_COPY = /\b(stuff|things|something|that project|the project|follow up)\b/i
 
 export function evaluateWorkingMemory(testCase: WorkingMemoryEvalCase): EvalReport {
   const findings: EvalFinding[] = []
@@ -59,6 +61,7 @@ export function evaluateWorkingMemory(testCase: WorkingMemoryEvalCase): EvalRepo
   }
 
   const validSources = collectValidSources(testCase.input)
+  const allowedTemporalTerms = collectAllowedTemporalTerms(testCase.input)
   const bullets = collectBullets(testCase.output)
 
   for (const bullet of bullets) {
@@ -80,6 +83,22 @@ export function evaluateWorkingMemory(testCase: WorkingMemoryEvalCase): EvalRepo
     for (const phrase of BANNED_PHRASES) {
       if (bullet.text.toLowerCase().includes(phrase)) {
         findings.push({ severity: 'error', path: bullet.path, message: `contains banned phrase: ${phrase}` })
+      }
+    }
+    if (GENERIC_COPY.test(bullet.text)) {
+      findings.push({
+        severity: 'warn',
+        path: bullet.path,
+        message: 'uses generic copy where Lila should name the specific referent',
+      })
+    }
+    for (const token of temporalTokens(bullet.text)) {
+      if (!allowedTemporalTerms.has(token.toLowerCase())) {
+        findings.push({
+          severity: 'error',
+          path: bullet.path,
+          message: `temporal reference "${token}" is not grounded in the input`,
+        })
       }
     }
     for (const source of bullet.source_ids) {
@@ -168,6 +187,43 @@ function collectValidSources(input: ConsolidationInput): Set<string> {
     }
   }
   return out
+}
+
+function collectAllowedTemporalTerms(input: ConsolidationInput): Set<string> {
+  const out = new Set<string>()
+  out.add(input.current_date.toLowerCase())
+  for (const value of collectStrings(input)) {
+    for (const token of temporalTokens(value)) out.add(token.toLowerCase())
+    const date = parseDate(value)
+    if (date) {
+      for (const term of renderDateTerms(date)) out.add(term.toLowerCase())
+    }
+  }
+  return out
+}
+
+function collectStrings(value: unknown): string[] {
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) return value.flatMap(collectStrings)
+  if (value && typeof value === 'object') return Object.values(value).flatMap(collectStrings)
+  return []
+}
+
+function temporalTokens(text: string): string[] {
+  return Array.from(text.matchAll(TEMPORAL_TOKEN)).map((m) => m[0])
+}
+
+function parseDate(value: string): Date | null {
+  if (!/\d{4}-\d{2}-\d{2}/.test(value)) return null
+  const d = new Date(value)
+  return Number.isNaN(d.valueOf()) ? null : d
+}
+
+function renderDateTerms(date: Date): string[] {
+  const month = new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: 'UTC' }).format(date)
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(date)
+  const day = new Intl.DateTimeFormat('en-US', { day: 'numeric', timeZone: 'UTC' }).format(date)
+  return [month, `${month} ${day}`, weekday]
 }
 
 function collectBullets(output: ConsolidationOutput): Array<{ path: string; text: string; source_ids: SourceRef[] }> {
