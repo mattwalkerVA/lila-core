@@ -148,7 +148,7 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
   const since = new Date(Date.now() - lookbackDays * 86400_000).toISOString()
   const upcomingTo = new Date(Date.now() + 7 * 86400_000).toISOString()
 
-  const [captures, tasks, notes, reflections, events, memories, prevWm] = await Promise.all([
+  const [captures, tasks, notes, reflections, events, memories, prevWm, openClusters] = await Promise.all([
     sb.raw.from('captures').select('id, raw_text, created_at, shaped_into_table, shaped_into_id').eq('user_id', userId).gte('created_at', since).order('created_at', { ascending: true }),
     sb.raw.from('tasks').select('id, title, first_step, notes, layer, due_at, resolved_at, updated_at, created_at').eq('user_id', userId).gte('updated_at', since),
     sb.raw.from('notes').select('id, title, content, created_at').eq('user_id', userId).gte('created_at', since),
@@ -156,6 +156,7 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
     sb.raw.from('events').select('id, title, start_at, end_at, attendees, location, notes').eq('user_id', userId).gte('start_at', since).lte('start_at', upcomingTo).order('start_at', { ascending: true }),
     sb.raw.from('memories').select('id, sector, content, topic_key, salience, created_at').eq('user_id', userId).order('salience', { ascending: false }).limit(20),
     sb.raw.from('working_memory').select('greeting_context, focus_items, people_threads, quiet_items, generated_at').eq('user_id', userId).single(),
+    sb.raw.from('inbound_clusters').select('id, title, summary, urgency, due_at, action_needed, status, last_message_at').eq('user_id', userId).in('status', ['open', 'surfaced']).order('last_message_at', { ascending: false }).limit(10),
   ])
 
   const recentActivity: any[] = []
@@ -173,6 +174,22 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
   }
   for (const e of events.data ?? []) {
     recentActivity.push({ record: { table: 'events', id: e.id }, kind: 'event', ts: e.start_at, title: e.title, starts_at: e.start_at, ends_at: e.end_at, attendees: e.attendees, location: e.location })
+  }
+  for (const c of (openClusters.data ?? []) as Array<{
+    id: string; title: string; summary: string; urgency: number
+    due_at: string | null; action_needed: boolean; status: string; last_message_at: string
+  }>) {
+    recentActivity.push({
+      record: { table: 'inbound_clusters', id: c.id },
+      kind: 'inbound_cluster',
+      ts: c.last_message_at,
+      title: c.title,
+      summary: c.summary,
+      urgency: c.urgency,
+      due_at: c.due_at,
+      action_needed: c.action_needed,
+      status: c.status,
+    })
   }
   recentActivity.sort((a, b) => (a.ts < b.ts ? -1 : 1))
 

@@ -190,9 +190,17 @@ after it) into `proactive_events`, but **only** when a cluster is *both
 important and time-sensitive*:
 
 - `action_needed = true`, **and**
-- `due_at` is present and within ~7 days (or the body demands a
-  near-deadline action), **and**
+- `due_at` is present and within the user's **`important_inbound_horizon_days`**
+  (default **14**; stored in `notification_preferences`), **and**
 - the cluster has not already been surfaced.
+
+The 14-day default is deliberate: camps, travel, and other prep-heavy things
+arrive with lead time, and a push on day-of-email is more useful than silence
+followed by a scramble. Users who want a tighter window (only same-week
+urgencies) can lower it; users who plan further out can raise it. This is the
+same planning-horizon intuition as the `today / current / horizon` layer
+concept in the task system — the threshold moves with the user's style, not
+with a fixed calendar rule.
 
 The camp case clears this: three messages, a concrete date next week, an
 implied "be ready / register / pack" action → one push. A monthly
@@ -214,38 +222,54 @@ const CATEGORY_PRIORITY = {
 
 - Per-category cap: ≤1/day (`dailyByCat.important_inbound >= 1` →
   `rate_limit_important_inbound`), under the existing ≤3/day hard cap.
-- Preference flag: `notification_preferences.important_inbound_enabled`,
-  **default on but user-toggleable** — same treatment as `morning_brief`.
-  Disabling it does not stop home-screen surfacing, only the push.
+- Preference flags in `notification_preferences`:
+  - `important_inbound_enabled` — **default on**, user-toggleable. Disabling
+    stops the push but not home-screen surfacing.
+  - `important_inbound_horizon_days` — **default 14**, integer. Controls how
+    far in advance a dated, action-needed cluster earns a push. The threshold
+    check is `due_at <= now + horizon_days * 86400_000`.
 - Quiet hours, token hygiene, and the hard cap are inherited unchanged.
 
 ## Worked example — the camp emails
 
+Two runs of the same scenario, showing why the 14-day default matters.
+
+### Scenario A — emails arrive day-of (June 5, camp June 9)
+
 ```
-T+0   Mon 09:12  "Camp Cedar — Week of June 9: drop-off & what to bring"
-T+0   Mon 14:40  "Camp Cedar: signed waiver still needed for [kid]"
-T+1   Tue 08:05  "Reminder: Camp Cedar payment balance due Fri Jun 6"
+Fri Jun 5  09:12  "Camp Cedar — Week of June 9: drop-off & what to bring"
+Fri Jun 5  14:40  "Camp Cedar: signed waiver still needed for [kid]"
+Fri Jun 5  16:05  "Reminder: Camp Cedar payment balance due Fri Jun 6"
 ```
 
-1. `connectors-gmail-sync` pulls all three (primary/updates, unread, <14d).
-   Prefilter keeps them (real sender, not promotional).
-2. `inbound-triage` clusters them into one `inbound_clusters` row:
+1. `connectors-gmail-sync` pulls all three. Prefilter keeps them.
+2. `inbound-triage` clusters into one row:
    `title: "Camp Cedar — week of Jun 9"`,
    `summary: "Three notes from Camp Cedar: what to bring, a missing signed
    waiver, and a balance due Fri Jun 6."`,
-   `urgency: 0.8`, `due_at: 2026-06-06`, `action_needed: true`,
-   `message_ids: [m1, m2, m3]`.
-3. Threshold: action needed + dated within 7 days → emits one
-   `important_inbound` candidate, `scheduled_for ≈ now+5min`,
-   `source_ids = [{table:'inbound_messages', id:m1}, …]`.
-4. `proactive-deliver` sends one push in Lila's voice:
-   *"Camp Cedar needs three things before the 9th — a signed waiver and
-   the balance by Friday."* (≤140 chars).
-5. Tap → `conversation-anchor` seeds the thread with all three messages.
-   The user lands in a conversation that already has the receipts.
-6. Same cluster also appears as a home-screen `focus_item` via the next
-   consolidation. A fourth camp email folds into the cluster by
-   `cluster_key`; it does **not** re-alert.
+   `urgency: 0.9`, `due_at: 2026-06-06`, `action_needed: true`.
+3. Threshold: action needed + `due_at` (Jun 6) is 1 day out — well within
+   the 14-day horizon → emits one `important_inbound` push.
+4. Push: *"Camp Cedar needs three things before the 9th — a signed waiver
+   and the balance by Friday."* (≤140 chars).
+5. Tap → conversation anchored with all three messages as receipts.
+6. Cluster also surfaces as home-screen `focus_item` at next consolidation.
+
+### Scenario B — emails arrive with lead time (May 25, same camp)
+
+```
+Mon May 25  10:00  "Camp Cedar — Week of June 9: drop-off & what to bring"
+Mon May 25  14:40  "Camp Cedar: signed waiver still needed for [kid]"
+Tue May 26  08:05  "Camp Cedar payment due Fri Jun 6"
+```
+
+With a hardcoded 7-day window, these would silently route to the home screen
+only — `due_at` Jun 6 is 12 days out, outside 7. **With the 14-day horizon
+(default), they push on May 25**: same cluster, same urgency, same action
+items — just caught early enough to act on.
+
+The user gets the push on May 25. A fourth camp email on June 3 folds into
+the cluster by `cluster_key` and does **not** re-alert (already `surfaced`).
 
 ## Privacy and trust — the new surface
 
@@ -336,3 +360,8 @@ decision is recorded in [ADR-003](./ADR/ADR-003-proactive-email-ingest.md).
    function (proposed, clean separation) or fold clustering into the
    nightly consolidation pass (fewer functions, but couples email latency
    to the nightly cycle and weakens same-day surfacing).
+5. **Horizon default and range** — 14 days proposed as default for
+   `important_inbound_horizon_days`. Range: should 7 be the floor (never
+   push for things more than a month out) or should users be able to set
+   21/30 for longer-lead planning styles? The first dial to tune after
+   launch.

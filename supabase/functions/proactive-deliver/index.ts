@@ -8,7 +8,7 @@
 //   3. Send via APNs. On 200, set delivered_at. On failure, log
 //      suppressed_reason and skip.
 //
-// Priority order when caps would be exceeded: high_confidence > morning_brief > forgotten.
+// Priority order when caps would be exceeded: high_confidence > important_inbound > morning_brief > forgotten.
 
 import { adminSupabase, HttpError } from '../_shared/scopedSupabase.ts'
 import { withErrorHandling, jsonResponse } from '../_shared/http.ts'
@@ -16,9 +16,10 @@ import { sendApnsPush } from '../_shared/apns.ts'
 
 const CATEGORY_PRIORITY: Record<string, number> = {
   high_confidence: 0,
-  morning_brief: 1,
-  forgotten: 2,
-  drift: 3,
+  important_inbound: 1,
+  morning_brief: 2,
+  forgotten: 3,
+  drift: 4,
 }
 
 const HARD_DAILY_CAP = 3
@@ -124,6 +125,7 @@ function decideSuppression(
   if (dailyCount >= HARD_DAILY_CAP) return 'rate_limit_daily'
 
   // Per-category caps (spec §9.2).
+  if (cand.category === 'important_inbound' && (dailyByCat.important_inbound ?? 0) >= 1) return 'rate_limit_important_inbound'
   if (cand.category === 'morning_brief' && (dailyByCat.morning_brief ?? 0) >= 1) return 'rate_limit_morning_brief'
   if (cand.category === 'forgotten' && weekCount(cand.user_id, 'forgotten') >= 1) {
     // weekCount is async — we approximate with the daily count here; a
@@ -133,6 +135,7 @@ function decideSuppression(
   if (cand.category === 'high_confidence' && (dailyByCat.high_confidence ?? 0) >= 1) return 'rate_limit_high_confidence'
 
   // Category preferences.
+  if (cand.category === 'important_inbound' && pref.important_inbound_enabled === false) return 'category_disabled'
   if (cand.category === 'morning_brief' && !pref.morning_brief_enabled) return 'category_disabled'
   if (cand.category === 'forgotten' && !pref.forgotten_enabled) return 'category_disabled'
   if (cand.category === 'high_confidence' && !pref.high_confidence_enabled) return 'category_disabled'

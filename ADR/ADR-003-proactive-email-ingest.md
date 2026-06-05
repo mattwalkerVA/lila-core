@@ -42,12 +42,14 @@ bearing decisions.
    and emits a per-cluster judgment: summary, urgency, `due_at` (only if
    present in the text), and whether action is owed.
 
-4. **Two surfaces, one high threshold.** Clusters default to the **home
-   screen** via consolidation (no interruption). A cluster earns a push —
+4. **Two surfaces, one user-calibrated threshold.** Clusters default to the
+   **home screen** via consolidation (no interruption). A cluster earns a push —
    the new `important_inbound` proactive category — only when it is *both*
-   action-needed *and* dated within ~7 days. The push category inherits the
-   ≤3/day hard cap, gets a ≤1/day sub-cap, and a default-on but toggleable
-   preference flag. When in doubt, no push.
+   action-needed *and* `due_at` falls within the user's
+   `important_inbound_horizon_days` (default **14**, stored in
+   `notification_preferences`). The push category inherits the ≤3/day hard
+   cap, gets a ≤1/day sub-cap, and a default-on but toggleable enabled flag.
+   When in doubt, no push.
 
 5. **Per-user encrypted OAuth state.** Refresh tokens live in a new
    `connector_accounts` table, encrypted at rest — not the single-token-
@@ -99,4 +101,5 @@ bearing decisions.
   Gmail.
 - Users report the `important_inbound` threshold is either too quiet
   (missed a real deadline) or too loud (pushed a dateless FYI) — the
-  threshold in decision #4 is the first dial to turn.
+  `important_inbound_horizon_days` preference in decision #4 is the first
+  dial to turn.
