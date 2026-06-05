@@ -156,7 +156,8 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
     sb.raw.from('events').select('id, title, start_at, end_at, attendees, location, notes').eq('user_id', userId).gte('start_at', since).lte('start_at', upcomingTo).order('start_at', { ascending: true }),
     sb.raw.from('memories').select('id, sector, content, topic_key, salience, created_at').eq('user_id', userId).order('salience', { ascending: false }).limit(20),
     sb.raw.from('working_memory').select('greeting_context, focus_items, people_threads, quiet_items, generated_at').eq('user_id', userId).single(),
-    sb.raw.from('inbound_clusters').select('id, title, summary, urgency, due_at, action_needed, status, last_message_at').eq('user_id', userId).in('status', ['open', 'surfaced']).order('last_message_at', { ascending: false }).limit(10),
+    // inbound_clusters is a 1.1 table — query resolves to empty until migration is applied.
+    sb.raw.from('inbound_clusters').select('id, title, summary, urgency, due_at, action_needed, status, last_message_at').eq('user_id', userId).in('status', ['open', 'surfaced']).order('last_message_at', { ascending: false }).limit(10).then((r) => r.error ? { data: [] } : r),
   ])
 
   const recentActivity: any[] = []
