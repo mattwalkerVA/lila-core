@@ -31,6 +31,11 @@ Anything below 1.2 is intent, not commitment.
 - **Google Calendar OAuth.** First non-Apple connector. Reuses the
   `events` table and the existing reconciliation pattern. The OAuth
   exchange lives in a new `connectors-google-calendar-*` function tree.
+- **Proactive email.** Server-side Gmail pull → cluster related messages
+  → a new `important_inbound` push category that fires only for dated,
+  action-needed clusters; everything else surfaces on the home screen.
+  Design in [PROACTIVE_EMAIL.md](./PROACTIVE_EMAIL.md), decisions in
+  [ADR-003](./ADR/ADR-003-proactive-email-ingest.md).
 - **Vector retrieval over conversation history.** When `conversation_messages`
   passes ~500 rows for a given user, the 20-message window stops
   carrying enough. Backfill embeddings on a one-time migration; flip a
