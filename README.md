@@ -83,6 +83,7 @@ supabase/
       conversation.ts                  Streaming conversation system prompt.
       proactive_scan.ts                Generates push candidates after consolidation.
       morning_brief.ts                 Body of the optional morning brief push.
+      inbound_triage.ts                Clusters Gmail messages + judges urgency (1.1).
   functions/
     capture-classify/                  POST /capture/classify          (Haiku)
     capture-shape/                     POST /capture/shape             (Sonnet)
@@ -95,6 +96,9 @@ supabase/
     conversation-send/                 POST /conversation/send         (SSE streaming)
     conversation-anchor/               POST /conversation/anchor       (seed from a tapped bullet)
     connectors-calendar-sync/          POST /connectors/calendar/sync  (called from iOS EventKit)
+    connectors-gmail-sync/             Cron, every 15 min — server-side Gmail pull (1.1).
+    connectors-gmail-oauth/            POST /connectors/gmail/oauth    — code→token exchange (1.1).
+    inbound-triage/                    POST /inbound-triage            — cluster + judge Gmail messages (1.1).
     push-register/                     POST /push/register             (APNs token)
     push-test/                         POST /push/test                 (dev only)
     proactive-deliver/                 Cron, every 5 min — drains proactive_events queue.
@@ -104,7 +108,9 @@ supabase/
 src/                                   Two primitives, named.
   memory/                              Persistence, salience, source receipts, consolidation. Local CLI for prompt iteration.
   attention/                           Noticing, scheduling, proactive surfacing. Runtime lives in supabase/functions/proactive-*; this directory documents the conceptual home.
-  connectors/                          External-system bridges (Google Calendar — deferred to 1.1).
+  connectors/
+    google-calendar/                   Google Calendar OAuth connector (1.1).
+    gmail/                             Gmail OAuth connector — auth, fetch, sync (1.1).
 scripts/                               Local CLI helpers — `wm:consolidate*`. Useful for prompt-tuning.
 src/eval/                              Golden-set checks for working-memory regressions.
 ADR/                                   Architecture Decision Records — short writeups of non-obvious choices.
@@ -135,7 +141,8 @@ supabase functions serve capture-shape \
 `./.env.local` should set `ANTHROPIC_API_KEY`, `SUPABASE_URL`,
 `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`. For the proactive
 worker also set `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_PRIVATE_KEY`,
-`APNS_BUNDLE_ID`.
+`APNS_BUNDLE_ID`. For the Gmail connector (1.1) also set
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
 
 ## Output contract
 
@@ -157,12 +164,20 @@ The evaluator catches missing or hallucinated receipts, too-fresh quiet
 items, second-person copy, banned voice phrases, structural drift, and
 scenario-specific expectations. See [`EVALS.md`](./EVALS.md).
 
-## Connectors in 1.0
+## Connectors
 
-**Apple Calendar via EventKit only.** Google Calendar, Gmail, Reminders,
-and the rest are deferred to 1.1+. The Google Calendar scripts in
-`scripts/` and `src/connectors/google-calendar/` are not part of the 1.0
-deployment; they remain for prompt iteration and future re-enablement.
+**1.0 — Apple Calendar via EventKit only.** iOS pushes events in;
+`connectors-calendar-sync` reconciles them into the `events` table.
+
+**1.1 — Gmail (server-side pull).** The connector code and edge functions
+are implemented in this repo (`src/connectors/gmail/`,
+`connectors-gmail-sync`, `connectors-gmail-oauth`, `inbound-triage`).
+Activation requires the lila-ios migrations (`connector_accounts`,
+`inbound_messages`, `inbound_clusters`) and the iOS OAuth connect flow.
+See [`PROACTIVE_EMAIL.md`](./PROACTIVE_EMAIL.md) and
+[`ADR/ADR-003`](./ADR/ADR-003-proactive-email-ingest.md).
+
+Google Calendar and Reminders remain deferred to 1.1+.
 
 ## Reading order, if you're forking
 
