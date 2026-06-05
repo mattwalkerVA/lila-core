@@ -6,8 +6,8 @@
 // Re-running on the same inbox is a no-op for messages that haven't changed.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { GmailMessageMeta, GmailMessageFull } from './fetch.js'
-import { getHeader } from './fetch.js'
+import type { GmailMessageMeta, GmailMessageFull } from './fetch.ts'
+import { getHeader } from './fetch.ts'
 
 export const CONNECTOR = 'gmail'
 
