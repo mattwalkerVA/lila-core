@@ -7,7 +7,7 @@
 // memory-consolidate, never called from the iOS client.
 
 import { adminSupabase, HttpError } from '../_shared/scopedSupabase.ts'
-import { withErrorHandling, jsonResponse, readJson } from '../_shared/http.ts'
+import { withErrorHandling, jsonResponse, hasServiceRole, readJson } from '../_shared/http.ts'
 import { anthropic, MODELS } from '../_shared/client.ts'
 import { proactiveScanSystem, proactiveScanUser } from '../_shared/prompts/proactive_scan.ts'
 import { parseJsonObject } from '../_shared/json.ts'
@@ -20,7 +20,7 @@ interface Body {
 
 Deno.serve(withErrorHandling(async (req) => {
   const auth = req.headers.get('authorization') ?? ''
-  if (!auth.includes(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '__never__')) {
+  if (!hasServiceRole(auth)) {
     throw new HttpError(403, 'service-role only')
   }
   const body = await readJson<Body>(req)

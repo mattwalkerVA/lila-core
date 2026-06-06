@@ -14,10 +14,9 @@
 // Triage describes; the threshold decides. No push decision in the prompt.
 
 import { adminSupabase, HttpError } from '../_shared/scopedSupabase.ts'
-import { withErrorHandling, jsonResponse, readJson } from '../_shared/http.ts'
+import { withErrorHandling, jsonResponse, hasServiceRole, readJson } from '../_shared/http.ts'
 import { anthropic, MODELS } from '../_shared/client.ts'
 import { inboundTriageSystem, inboundTriageUser } from '../_shared/prompts/inbound_triage.ts'
-import { parseJsonObject } from '../_shared/json.ts'
 
 interface Body {
   user_id: string
@@ -37,14 +36,16 @@ const DEFAULT_HORIZON_DAYS = 14
 
 Deno.serve(withErrorHandling(async (req) => {
   const auth = req.headers.get('authorization') ?? ''
-  if (!auth.includes(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '__never__')) {
+  if (!hasServiceRole(auth)) {
     throw new HttpError(403, 'service-role only')
   }
   const body = await readJson<Body>(req)
   if (!body.user_id) throw new HttpError(400, 'user_id required')
   const userId = body.user_id
 
-  // Load untriaged kept messages from the last 14 days.
+  // Load untriaged kept messages from the last 14 days, newest first,
+  // capped at 30 per run. The sync cron calls triage after every sync,
+  // so a backlog drains over successive runs without overflowing context.
   const since = new Date(Date.now() - 14 * 86400_000).toISOString()
   const { data: newMessages, error: msgErr } = await adminSupabase
     .from('inbound_messages')
@@ -53,7 +54,8 @@ Deno.serve(withErrorHandling(async (req) => {
     .eq('importance', 'keep')
     .is('triaged_at', null)
     .gte('received_at', since)
-    .order('received_at', { ascending: true })
+    .order('received_at', { ascending: false })
+    .limit(30)
   if (msgErr) throw new HttpError(500, `load messages: ${msgErr.message}`)
   if (!newMessages || newMessages.length === 0) return jsonResponse({ clusters: 0, pushed: 0 })
 
@@ -82,22 +84,63 @@ Deno.serve(withErrorHandling(async (req) => {
   const horizonDays: number = (pref as any)?.important_inbound_horizon_days ?? DEFAULT_HORIZON_DAYS
   const inboundEnabled: boolean = (pref as any)?.important_inbound_enabled ?? true
 
-  // Run Sonnet triage.
+  // Truncate body_text before sending to the model — first 600 chars is
+  // enough for triage; full bodies balloon the context and can truncate the
+  // JSON response against max_tokens.
+  const messagesForModel = (newMessages as Array<Record<string, unknown>>).map((m) => ({
+    ...m,
+    body_text: typeof m.body_text === 'string' && m.body_text.length > 600
+      ? m.body_text.slice(0, 600) + '…'
+      : m.body_text,
+  }))
+
+  // Use tool_use so output goes through Anthropic's constrained JSON decoder —
+  // this eliminates parse fragility from unicode characters or control chars
+  // that models occasionally emit in free-form JSON output.
   const r = await anthropic.messages.create({
     model: MODELS.sonnet,
-    max_tokens: 2048,
+    max_tokens: 4096,
     system: [{ type: 'text', text: inboundTriageSystem(firstName), cache_control: { type: 'ephemeral' } }],
+    tools: [{
+      name: 'report_triage',
+      description: 'Report the triage results for the provided messages.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          clusters: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                cluster_key: { type: 'string' },
+                title: { type: 'string' },
+                summary: { type: 'string' },
+                urgency: { type: 'number' },
+                due_at: { type: 'string', nullable: true },
+                action_needed: { type: 'boolean' },
+                message_ids: { type: 'array', items: { type: 'string' } },
+              },
+              required: ['cluster_key', 'title', 'summary', 'urgency', 'due_at', 'action_needed', 'message_ids'],
+            },
+          },
+        },
+        required: ['clusters'],
+      },
+    }],
+    tool_choice: { type: 'tool', name: 'report_triage' },
     messages: [{
       role: 'user',
       content: inboundTriageUser(
-        JSON.stringify(newMessages, null, 2),
+        JSON.stringify(messagesForModel, null, 2),
         JSON.stringify(openClusters ?? [], null, 2),
       ),
     }],
   })
-  const text = (r.content[0] as any).text as string
-  const parsed = parseJsonObject<{ clusters: TriageCluster[] }>(text)
-  const clusters: TriageCluster[] = Array.isArray(parsed.clusters) ? parsed.clusters : []
+  const toolUse = r.content.find((c: any) => c.type === 'tool_use')
+  if (!toolUse) throw new HttpError(500, 'triage: no tool_use in response')
+  const clusters: TriageCluster[] = Array.isArray((toolUse as any).input?.clusters)
+    ? (toolUse as any).input.clusters
+    : []
 
   if (clusters.length === 0) {
     await markTriaged(userId, newMessages.map((m: any) => m.id), null)

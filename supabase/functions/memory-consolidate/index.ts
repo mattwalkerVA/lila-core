@@ -12,7 +12,7 @@
 // proactive-scan in the background.
 
 import { adminSupabase, authenticate, HttpError, scopedSupabase } from '../_shared/scopedSupabase.ts'
-import { withErrorHandling, jsonResponse, readJson } from '../_shared/http.ts'
+import { withErrorHandling, jsonResponse, readJson, hasServiceRole } from '../_shared/http.ts'
 import { anthropic, MODELS } from '../_shared/client.ts'
 import { consolidationSystem, consolidationUser, ConsolidationVars } from '../_shared/prompts/consolidation.ts'
 import { parseJsonObject } from '../_shared/json.ts'
@@ -31,9 +31,8 @@ Deno.serve(withErrorHandling(async (req) => {
 
   // Resolve who we're consolidating for. If the caller is service-role,
   // body.user_id is required. Otherwise, take the authed user.
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const auth = req.headers.get('authorization') ?? ''
-  const isService = serviceKey && auth.includes(serviceKey)
+  const isService = hasServiceRole(auth)
 
   let userId: string
   let trigger: 'cron' | 'manual' | 'third_capture' = body.trigger ?? 'manual'

@@ -11,7 +11,7 @@
 // Priority order when caps would be exceeded: high_confidence > important_inbound > morning_brief > forgotten.
 
 import { adminSupabase, HttpError } from '../_shared/scopedSupabase.ts'
-import { withErrorHandling, jsonResponse } from '../_shared/http.ts'
+import { withErrorHandling, jsonResponse, hasServiceRole } from '../_shared/http.ts'
 import { sendApnsPush } from '../_shared/apns.ts'
 
 const CATEGORY_PRIORITY: Record<string, number> = {
@@ -26,7 +26,7 @@ const HARD_DAILY_CAP = 3
 
 Deno.serve(withErrorHandling(async (req) => {
   const auth = req.headers.get('authorization') ?? ''
-  if (!auth.includes(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '__never__')) {
+  if (!hasServiceRole(auth)) {
     throw new HttpError(403, 'service-role only')
   }
 

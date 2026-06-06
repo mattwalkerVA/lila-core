@@ -10,11 +10,11 @@
 // and skip if found.
 
 import { adminSupabase, HttpError } from '../_shared/scopedSupabase.ts'
-import { withErrorHandling, jsonResponse } from '../_shared/http.ts'
+import { withErrorHandling, jsonResponse, hasServiceRole } from '../_shared/http.ts'
 
 Deno.serve(withErrorHandling(async (req) => {
   const auth = req.headers.get('authorization') ?? ''
-  if (!auth.includes(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '__never__')) {
+  if (!hasServiceRole(auth)) {
     throw new HttpError(403, 'service-role only')
   }
 

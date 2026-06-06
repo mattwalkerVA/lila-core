@@ -15,15 +15,16 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 
 export async function exchangeRefreshToken(
   clientId: string,
-  clientSecret: string,
+  clientSecret: string | null,
   refreshToken: string,
 ): Promise<AccessToken> {
-  const body = new URLSearchParams({
+  const params: Record<string, string> = {
     client_id: clientId,
-    client_secret: clientSecret,
     refresh_token: refreshToken,
     grant_type: 'refresh_token',
-  })
+  }
+  if (clientSecret) params.client_secret = clientSecret
+  const body = new URLSearchParams(params)
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

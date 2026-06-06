@@ -11,5 +11,11 @@ export function extractJsonObject(text: string): string {
 }
 
 export function parseJsonObject<T = unknown>(text: string): T {
-  return JSON.parse(extractJsonObject(text)) as T
+  const extracted = extractJsonObject(text)
+  // Models occasionally emit literal newlines inside JSON string values.
+  // JSON.parse rejects these (strings must use \n escape sequences).
+  // Replacing all literal CR/LF with a space is safe: JSON uses whitespace
+  // only as structural formatting between tokens, never inside string values.
+  const cleaned = extracted.replace(/\r?\n/g, ' ')
+  return JSON.parse(cleaned) as T
 }

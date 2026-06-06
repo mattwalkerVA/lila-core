@@ -91,7 +91,7 @@ async function listViaQuery(
 ): Promise<{ messageIds: string[]; newHistoryId: string | null }> {
   // Gmail does the cheap filtering for free: drop promotions/social before
   // we even see the message. Unread + primary/updates covers what matters.
-  const q = 'is:unread (category:primary OR category:updates) newer_than:14d -category:promotions -category:social'
+  const q = '(category:primary OR category:updates) newer_than:14d -category:promotions -category:social'
   const ids: string[] = []
   let pageToken: string | undefined
 

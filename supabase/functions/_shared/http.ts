@@ -58,3 +58,16 @@ export async function readJson<T = unknown>(req: Request): Promise<T> {
     throw new HttpError(400, 'invalid JSON body')
   }
 }
+
+// Returns true if the Authorization header carries a service-role JWT.
+// The Supabase gateway already verifies the signature, so we only need
+// to inspect the role claim — no need to re-verify or match the raw key.
+export function hasServiceRole(authHeader: string): boolean {
+  try {
+    const token = authHeader.replace(/^Bearer\s+/i, '')
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return payload.role === 'service_role'
+  } catch {
+    return false
+  }
+}

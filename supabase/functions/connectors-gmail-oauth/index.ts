@@ -82,6 +82,8 @@ Deno.serve(withErrorHandling(async (req) => {
       provider: 'gmail',
       refresh_token: tokens.refresh_token,
       scopes: tokens.scope ?? 'https://www.googleapis.com/auth/gmail.readonly',
+      // Store the client_id so the sync function refreshes with the right client.
+      oauth_client_id: isNativeFlow ? clientId : null,
       history_id: null,
       status: 'connected',
       connected_at: new Date().toISOString(),

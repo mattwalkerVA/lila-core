@@ -14,7 +14,7 @@
 // one revoked token should not block everyone else.
 
 import { adminSupabase, HttpError } from '../_shared/scopedSupabase.ts'
-import { withErrorHandling, jsonResponse } from '../_shared/http.ts'
+import { withErrorHandling, jsonResponse, hasServiceRole } from '../_shared/http.ts'
 import { exchangeRefreshToken } from '../../../src/connectors/gmail/auth.ts'
 import {
   listNewMessageIds,
@@ -26,20 +26,20 @@ import { mapMessage, passesPrefilter, reconcile } from '../../../src/connectors/
 
 Deno.serve(withErrorHandling(async (req) => {
   const auth = req.headers.get('authorization') ?? ''
-  if (!auth.includes(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '__never__')) {
+  if (!hasServiceRole(auth)) {
     throw new HttpError(403, 'service-role only')
   }
 
   const { data: accounts, error: acctErr } = await adminSupabase
     .from('connector_accounts')
-    .select('user_id, refresh_token, history_id')
+    .select('user_id, refresh_token, history_id, oauth_client_id')
     .eq('provider', 'gmail')
     .eq('status', 'connected')
   if (acctErr) throw new HttpError(500, `load accounts: ${acctErr.message}`)
   if (!accounts || accounts.length === 0) return jsonResponse({ users: 0 })
 
-  const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
-  const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
+  const webClientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
+  const webClientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
 
   const results = await Promise.allSettled(
     (
@@ -47,8 +47,15 @@ Deno.serve(withErrorHandling(async (req) => {
         user_id: string
         refresh_token: string
         history_id: string | null
+        oauth_client_id: string | null
       }>
-    ).map((acct) => syncUser(acct, clientId, clientSecret)),
+    ).map((acct) => {
+      // Refresh tokens are bound to the client that issued them.
+      // iOS native clients have their own client_id and no secret.
+      const clientId = acct.oauth_client_id ?? webClientId
+      const clientSecret = acct.oauth_client_id ? null : webClientSecret
+      return syncUser(acct, clientId, clientSecret)
+    }),
   )
 
   const ok = results.filter((r) => r.status === 'fulfilled').length
@@ -57,13 +64,13 @@ Deno.serve(withErrorHandling(async (req) => {
     .map((r) => r.reason?.message ?? 'unknown')
   if (errors.length > 0) console.error('gmail-sync user errors:', errors)
 
-  return jsonResponse({ users: accounts.length, ok, failed: errors.length })
+  return jsonResponse({ users: accounts.length, ok, failed: errors.length, errors })
 }))
 
 async function syncUser(
   acct: { user_id: string; refresh_token: string; history_id: string | null },
   clientId: string,
-  clientSecret: string,
+  clientSecret: string | null,
 ) {
   const { token } = await exchangeRefreshToken(clientId, clientSecret, acct.refresh_token)
 
@@ -76,19 +83,22 @@ async function syncUser(
     return { user_id: acct.user_id, new_messages: 0 }
   }
 
-  // Fetch metadata for all new message IDs in parallel (bounded batch).
-  const metaBatch = await Promise.all(messageIds.map((id) => fetchMessageMeta(token, id)))
+  // Fetch metadata in bounded batches to stay under Gmail's per-user
+  // concurrency limit. 5 concurrent is safe; unlimited causes 429.
+  const metaBatch = await batchedMap(messageIds, (id) => fetchMessageMeta(token, id), 5)
 
   // Two buckets: messages that pass the prefilter get full bodies; others are
   // recorded as importance='drop' with metadata only (no body storage).
   const survivors = metaBatch.filter(passesPrefilter)
   const dropped = metaBatch.filter((m) => !passesPrefilter(m))
 
-  const keptMapped = await Promise.all(
-    survivors.map(async (meta) => {
+  const keptMapped = await batchedMap(
+    survivors,
+    async (meta) => {
       const full = await fetchMessageFull(token, meta.id)
       return mapMessage(full, extractBodyText(full), true)
-    }),
+    },
+    5,
   )
   const droppedMapped = dropped.map((meta) => mapMessage(meta as any, null, false))
 
@@ -108,6 +118,19 @@ async function advanceCursor(userId: string, historyId: string) {
     .update({ history_id: historyId, last_synced_at: new Date().toISOString() })
     .eq('user_id', userId)
     .eq('provider', 'gmail')
+}
+
+async function batchedMap<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  concurrency: number,
+): Promise<R[]> {
+  const results: R[] = []
+  for (let i = 0; i < items.length; i += concurrency) {
+    const batch = items.slice(i, i + concurrency)
+    results.push(...(await Promise.all(batch.map(fn))))
+  }
+  return results
 }
 
 async function triggerInboundTriage(userId: string) {

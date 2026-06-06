@@ -5,14 +5,14 @@
 // inserts it into proactive_events with category='morning_brief'.
 
 import { adminSupabase, HttpError } from '../_shared/scopedSupabase.ts'
-import { withErrorHandling, jsonResponse } from '../_shared/http.ts'
+import { withErrorHandling, jsonResponse, hasServiceRole } from '../_shared/http.ts'
 import { anthropic, MODELS } from '../_shared/client.ts'
 import { morningBriefSystem, morningBriefUser } from '../_shared/prompts/morning_brief.ts'
 import { parseJsonObject } from '../_shared/json.ts'
 
 Deno.serve(withErrorHandling(async (req) => {
   const auth = req.headers.get('authorization') ?? ''
-  if (!auth.includes(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '__never__')) {
+  if (!hasServiceRole(auth)) {
     throw new HttpError(403, 'service-role only')
   }
 
