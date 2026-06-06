@@ -95,6 +95,10 @@ Deno.serve(withErrorHandling(async (req) => {
     parseSuccess = true
     output = parsed as Record<string, unknown>
 
+    // Build agenda_items mechanically — no model involved, no hallucination risk.
+    // Pull from events, open tasks with due_at, and email clusters with due_at.
+    const agendaItems = buildAgendaItems(inputs)
+
     // Upsert working_memory (one row per user).
     const sb = scopedSupabase(userId)
     const { error: upsertErr } = await sb.from('working_memory').upsert({
@@ -103,6 +107,7 @@ Deno.serve(withErrorHandling(async (req) => {
       focus_items: parsed.focus_items ?? [],
       people_threads: parsed.people_threads ?? [],
       quiet_items: parsed.quiet_items ?? [],
+      agenda_items: agendaItems,
       generated_at: new Date().toISOString(),
     } as any, { onConflict: 'user_id' } as any)
     if (upsertErr) throw new Error(`working_memory upsert failed: ${upsertErr.message}`)
@@ -135,11 +140,68 @@ Deno.serve(withErrorHandling(async (req) => {
   }
 }))
 
+export interface AgendaItem {
+  text: string
+  date: string        // YYYY-MM-DD
+  time: string | null // HH:MM or null
+  source_ids: Array<{ table: string; id: string }>
+}
+
+function buildAgendaItems(inputs: ConsolidationInputs): AgendaItem[] {
+  const horizon = Date.now() + 14 * 86400_000
+  const now = Date.now()
+  const items: AgendaItem[] = []
+
+  for (const e of inputs.upcomingEvents as Array<any>) {
+    const start = new Date(e.start_at)
+    if (isNaN(start.getTime()) || start.getTime() < now || start.getTime() > horizon) continue
+    items.push({
+      text: e.title,
+      date: e.start_at.slice(0, 10),
+      time: e.start_at.length > 10 ? e.start_at.slice(11, 16) : null,
+      source_ids: [{ table: 'events', id: e.id }],
+    })
+  }
+
+  for (const t of inputs.openTasks as Array<any>) {
+    if (!t.due_at || t.resolved_at) continue
+    const due = new Date(t.due_at)
+    if (isNaN(due.getTime()) || due.getTime() < now || due.getTime() > horizon) continue
+    items.push({
+      text: t.title,
+      date: t.due_at.slice(0, 10),
+      time: null,
+      source_ids: [{ table: 'tasks', id: t.id }],
+    })
+  }
+
+  for (const c of inputs.openClusters as Array<any>) {
+    if (!c.due_at || !c.action_needed) continue
+    const due = new Date(c.due_at)
+    if (isNaN(due.getTime()) || due.getTime() < now || due.getTime() > horizon) continue
+    items.push({
+      text: c.title,
+      date: c.due_at.slice(0, 10),
+      time: null,
+      source_ids: [{ table: 'inbound_clusters', id: c.id }],
+    })
+  }
+
+  items.sort((a, b) => {
+    const cmp = a.date.localeCompare(b.date)
+    if (cmp !== 0) return cmp
+    return (a.time ?? '').localeCompare(b.time ?? '')
+  })
+  return items.slice(0, 10)
+}
+
 interface ConsolidationInputs {
   recentActivity: any[]
   previousWorkingMemory: any | null
   retrievedMemories: any[]
   upcomingEvents: any[]
+  openTasks: any[]
+  openClusters: any[]
 }
 
 async function loadInputs(userId: string, lookbackDays: number): Promise<ConsolidationInputs> {
@@ -147,7 +209,7 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
   const since = new Date(Date.now() - lookbackDays * 86400_000).toISOString()
   const upcomingTo = new Date(Date.now() + 7 * 86400_000).toISOString()
 
-  const [captures, tasks, notes, reflections, events, memories, prevWm, openClusters] = await Promise.all([
+  const [captures, tasks, notes, reflections, events, memories, prevWm, openClusters_raw] = await Promise.all([
     sb.raw.from('captures').select('id, raw_text, created_at, shaped_into_table, shaped_into_id').eq('user_id', userId).gte('created_at', since).order('created_at', { ascending: true }),
     sb.raw.from('tasks').select('id, title, first_step, notes, layer, due_at, resolved_at, updated_at, created_at').eq('user_id', userId).gte('updated_at', since),
     sb.raw.from('notes').select('id, title, content, created_at').eq('user_id', userId).gte('created_at', since),
@@ -175,7 +237,7 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
   for (const e of events.data ?? []) {
     recentActivity.push({ record: { table: 'events', id: e.id }, kind: 'event', ts: e.start_at, title: e.title, starts_at: e.start_at, ends_at: e.end_at, attendees: e.attendees, location: e.location })
   }
-  for (const c of (openClusters.data ?? []) as Array<{
+  for (const c of (openClusters_raw.data ?? []) as Array<{
     id: string; title: string; summary: string; urgency: number
     due_at: string | null; action_needed: boolean; status: string; last_message_at: string
   }>) {
@@ -194,6 +256,8 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
   recentActivity.sort((a, b) => (a.ts < b.ts ? -1 : 1))
 
   const upcomingEvents = events.data ?? []
+  const openTasks = (tasks.data ?? []).filter((t: any) => !t.resolved_at && t.due_at)
+  const openClusters = (openClusters_raw.data ?? []) as any[]
   const retrievedMemories = (memories.data ?? []).map((m: any) => ({
     ts: m.created_at, salience: m.salience, text: m.content, sector: m.sector,
   }))
@@ -202,6 +266,8 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
     recentActivity,
     previousWorkingMemory: prevWm.data ?? null,
     retrievedMemories,
+    openTasks,
+    openClusters,
     upcomingEvents,
   }
 }
