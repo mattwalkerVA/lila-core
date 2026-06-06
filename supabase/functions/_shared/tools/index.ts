@@ -25,8 +25,11 @@ export type ToolStatus = 'ok' | 'error'
 export interface ToolResult {
   status: ToolStatus
   summary: string
-  // Optional structured payload — not currently surfaced to the model
-  // beyond the summary string, but stored on tool_calls for client UIs.
+  // When set, used as the tool_result content block sent back to the model
+  // instead of summary. Lets read-tools return full text to the model while
+  // keeping the UI chip concise.
+  modelContent?: string
+  // Optional structured payload stored on tool_calls for client UIs.
   data?: Record<string, unknown>
 }
 
@@ -245,7 +248,58 @@ const dismissEmailCluster: ToolDefinition = {
   },
 }
 
-const ALL: ToolDefinition[] = [markTaskResolved, updateTask, resolveCapture, createReflection, correctMemory, dismissEmailCluster]
+const fetchEmailBody: ToolDefinition = {
+  name: 'fetch_email_body',
+  description:
+    'Read the full body text of emails in a cluster. Use when the user asks for specific details — address, packing list, schedule, instructions, exact wording — that aren\'t in the cluster summary. Pass the cluster_id and this tool returns the raw message bodies so you can answer precisely.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      cluster_id: {
+        type: 'string',
+        description: 'UUID of the inbound_cluster whose messages to fetch.',
+      },
+    },
+    required: ['cluster_id'],
+  },
+  async execute(input, sb) {
+    const clusterId = String(input.cluster_id ?? '')
+    if (!clusterId) return { status: 'error', summary: 'cluster_id required' }
+
+    // Look up the cluster to get its message_ids.
+    const { data: cluster, error: clusterErr } = await sb.raw
+      .from('inbound_clusters')
+      .select('id, title, message_ids')
+      .eq('id', clusterId)
+      .eq('user_id', sb.userId)
+      .single()
+    if (clusterErr || !cluster) return { status: 'error', summary: 'cluster not found' }
+
+    const messageIds: string[] = (cluster as any).message_ids ?? []
+    if (messageIds.length === 0) return { status: 'error', summary: 'cluster has no linked messages' }
+
+    const { data: messages, error: msgErr } = await sb.raw
+      .from('inbound_messages')
+      .select('id, subject, from_name, from_addr, received_at, body_text')
+      .in('id', messageIds)
+      .eq('user_id', sb.userId)
+      .order('received_at', { ascending: true })
+    if (msgErr) return { status: 'error', summary: `couldn't fetch messages: ${msgErr.message}` }
+
+    const bodies = ((messages ?? []) as Array<any>).map((m, i) =>
+      `--- Message ${i + 1}: "${m.subject}" from ${m.from_name ?? m.from_addr} (${(m.received_at ?? '').slice(0, 10)}) ---\n${m.body_text ?? '(no body)'}`,
+    ).join('\n\n')
+
+    const title = (cluster as any).title ?? 'email thread'
+    return {
+      status: 'ok',
+      summary: `fetched ${messageIds.length} message${messageIds.length !== 1 ? 's' : ''} from "${title}"`,
+      modelContent: `Full message bodies for cluster "${title}":\n\n${bodies}`,
+    }
+  },
+}
+
+const ALL: ToolDefinition[] = [markTaskResolved, updateTask, resolveCapture, createReflection, correctMemory, dismissEmailCluster, fetchEmailBody]
 const BY_NAME = new Map(ALL.map((t) => [t.name, t]))
 
 // Anthropic tool specs — what we send in messages.stream({ tools }).

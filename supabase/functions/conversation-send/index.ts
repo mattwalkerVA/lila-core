@@ -198,7 +198,7 @@ Deno.serve(withErrorHandling(async (req) => {
             toolResultBlocks.push({
               type: 'tool_result',
               tool_use_id: block.id,
-              content: result.summary,
+              content: result.modelContent ?? result.summary,
               is_error: result.status === 'error',
             })
           }
