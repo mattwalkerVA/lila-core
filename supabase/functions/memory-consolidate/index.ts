@@ -98,7 +98,7 @@ Deno.serve(withErrorHandling(async (req) => {
 
     // Build agenda_items mechanically — no model involved, no hallucination risk.
     // Pull from events, open tasks with due_at, and email clusters with due_at.
-    const agendaItems = buildAgendaItems(inputs)
+    const agendaItems = buildAgendaItems(inputs, tz)
 
     // Upsert working_memory (one row per user).
     const sb = scopedSupabase(userId)
@@ -149,7 +149,18 @@ export interface AgendaItem {
   source_ids: Array<{ table: string; id: string }>
 }
 
-function buildAgendaItems(inputs: ConsolidationInputs): AgendaItem[] {
+// Convert a UTC ISO string to local wall-clock date and time using the
+// user's stored timezone. sv-SE locale gives "YYYY-MM-DD HH:MM:SS" format.
+function localDateParts(utcString: string, tz: string): { date: string; time: string | null } {
+  const d = new Date(utcString)
+  if (isNaN(d.getTime())) return { date: utcString.slice(0, 10), time: null }
+  const local = d.toLocaleString('sv-SE', { timeZone: tz })
+  const [date, timeWithSeconds] = local.split(' ')
+  const time = utcString.length > 10 ? timeWithSeconds.slice(0, 5) : null
+  return { date, time }
+}
+
+function buildAgendaItems(inputs: ConsolidationInputs, tz: string): AgendaItem[] {
   const horizon = Date.now() + 14 * 86400_000
   const now = Date.now()
   const items: AgendaItem[] = []
@@ -157,10 +168,11 @@ function buildAgendaItems(inputs: ConsolidationInputs): AgendaItem[] {
   for (const e of inputs.upcomingEvents as Array<any>) {
     const start = new Date(e.start_at)
     if (isNaN(start.getTime()) || start.getTime() < now || start.getTime() > horizon) continue
+    const { date, time } = localDateParts(e.start_at, tz)
     items.push({
       text: e.title,
-      date: e.start_at.slice(0, 10),
-      time: e.start_at.length > 10 ? e.start_at.slice(11, 16) : null,
+      date,
+      time,
       source_ids: [{ table: 'events', id: e.id }],
     })
   }
@@ -177,8 +189,21 @@ function buildAgendaItems(inputs: ConsolidationInputs): AgendaItem[] {
     })
   }
 
-  // Email cluster dates are model-generated and unreliable for a schedule
-  // view — omit them. Clusters surface via focus_items instead.
+  // Email clusters only enter the agenda when triage flagged them as a
+  // genuine scheduled event (is_scheduled) — camp starting, a meeting, a
+  // trip. Deadlines, expirations, and security alerts are excluded even
+  // when they carry a date, because those aren't calendar items.
+  for (const c of inputs.scheduledClusters as Array<any>) {
+    if (!c.is_scheduled || !c.due_at) continue
+    const due = new Date(c.due_at)
+    if (isNaN(due.getTime()) || due.getTime() < now - 86400_000 || due.getTime() > horizon) continue
+    items.push({
+      text: c.title,
+      date: c.due_at.slice(0, 10),
+      time: null,
+      source_ids: [{ table: 'inbound_clusters', id: c.id }],
+    })
+  }
 
   items.sort((a, b) => {
     const cmp = a.date.localeCompare(b.date)
@@ -195,6 +220,7 @@ interface ConsolidationInputs {
   upcomingEvents: any[]
   openTasks: any[]
   openClusters: any[]
+  scheduledClusters: any[]
 }
 
 async function loadInputs(userId: string, lookbackDays: number): Promise<ConsolidationInputs> {
@@ -202,7 +228,7 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
   const since = new Date(Date.now() - lookbackDays * 86400_000).toISOString()
   const upcomingTo = new Date(Date.now() + 7 * 86400_000).toISOString()
 
-  const [captures, tasks, notes, reflections, events, memories, prevWm, openClusters_raw] = await Promise.all([
+  const [captures, tasks, notes, reflections, events, memories, prevWm, openClusters_raw, scheduledClusters_raw] = await Promise.all([
     sb.raw.from('captures').select('id, raw_text, created_at, shaped_into_table, shaped_into_id').eq('user_id', userId).gte('created_at', since).order('created_at', { ascending: true }),
     sb.raw.from('tasks').select('id, title, first_step, notes, layer, due_at, resolved_at, updated_at, created_at').eq('user_id', userId).gte('updated_at', since),
     sb.raw.from('notes').select('id, title, content, created_at').eq('user_id', userId).gte('created_at', since),
@@ -211,7 +237,10 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
     sb.raw.from('memories').select('id, sector, content, topic_key, salience, created_at').eq('user_id', userId).order('salience', { ascending: false }).limit(20),
     sb.raw.from('working_memory').select('greeting_context, focus_items, people_threads, quiet_items, generated_at').eq('user_id', userId).single(),
     // inbound_clusters is a 1.1 table — query resolves to empty until migration is applied.
-    sb.raw.from('inbound_clusters').select('id, title, summary, urgency, due_at, action_needed, status, last_message_at').eq('user_id', userId).in('status', ['open', 'surfaced']).order('last_message_at', { ascending: false }).limit(10).then((r) => r.error ? { data: [] } : r),
+    sb.raw.from('inbound_clusters').select('id, title, summary, urgency, due_at, action_needed, is_scheduled, status, last_message_at').eq('user_id', userId).in('status', ['open', 'surfaced']).order('last_message_at', { ascending: false }).limit(10).then((r) => r.error ? { data: [] } : r),
+    // Scheduled clusters within the agenda window — queried separately so a
+    // dated event isn't dropped by the activity feed's top-10 cap.
+    sb.raw.from('inbound_clusters').select('id, title, due_at, is_scheduled, status').eq('user_id', userId).in('status', ['open', 'surfaced']).eq('is_scheduled', true).not('due_at', 'is', null).order('due_at', { ascending: true }).limit(25).then((r) => r.error ? { data: [] } : r),
   ])
 
   const recentActivity: any[] = []
@@ -251,6 +280,7 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
   const upcomingEvents = events.data ?? []
   const openTasks = (tasks.data ?? []).filter((t: any) => !t.resolved_at && t.due_at)
   const openClusters = (openClusters_raw.data ?? []) as any[]
+  const scheduledClusters = (scheduledClusters_raw.data ?? []) as any[]
   const retrievedMemories = (memories.data ?? []).map((m: any) => ({
     ts: m.created_at, salience: m.salience, text: m.content, sector: m.sector,
   }))
@@ -261,6 +291,7 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
     retrievedMemories,
     openTasks,
     openClusters,
+    scheduledClusters,
     upcomingEvents,
   }
 }

@@ -29,6 +29,7 @@ interface TriageCluster {
   urgency: number
   due_at: string | null
   action_needed: boolean
+  is_scheduled: boolean  // true only when due_at is a genuine event/appointment date
   message_ids: string[]  // Gmail external IDs
 }
 
@@ -118,9 +119,13 @@ Deno.serve(withErrorHandling(async (req) => {
                 urgency: { type: 'number' },
                 due_at: { type: 'string', nullable: true },
                 action_needed: { type: 'boolean' },
+                is_scheduled: {
+                  type: 'boolean',
+                  description: 'true ONLY when due_at marks a genuine scheduled event or appointment that belongs on a calendar — a camp starting, a meeting, a trip, a drop-off. false for deadlines, expirations, password resets, security alerts, payment-due dates, or any administrative date. When in doubt, false.',
+                },
                 message_ids: { type: 'array', items: { type: 'string' } },
               },
-              required: ['cluster_key', 'title', 'summary', 'urgency', 'due_at', 'action_needed', 'message_ids'],
+              required: ['cluster_key', 'title', 'summary', 'urgency', 'due_at', 'action_needed', 'is_scheduled', 'message_ids'],
             },
           },
         },
@@ -181,6 +186,7 @@ Deno.serve(withErrorHandling(async (req) => {
           urgency: cluster.urgency,
           due_at: cluster.due_at ?? null,
           action_needed: cluster.action_needed,
+          is_scheduled: cluster.is_scheduled ?? false,
           message_ids: dbMessageIds,
           last_message_at: lastMessageAt,
           // first_seen_at is set only on insert (handled by DB default or we preserve it)
