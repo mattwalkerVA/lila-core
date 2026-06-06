@@ -186,7 +186,39 @@ const correctMemory: ToolDefinition = {
   },
 }
 
-const ALL: ToolDefinition[] = [markTaskResolved, updateTask, createReflection, correctMemory]
+const dismissEmailCluster: ToolDefinition = {
+  name: 'dismiss_email_cluster',
+  description:
+    'Dismiss an email cluster from the home screen. Use when the user says it\'s handled, not relevant, already aware, or otherwise wants it gone — phrases like "handled", "ignore that", "not relevant", "I know", "already dealt with". Sets status=dismissed so it stops surfacing. Irreversible via this tool, but the cluster row persists.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      cluster_id: { type: 'string', description: 'UUID of the inbound_cluster to dismiss.' },
+      title_hint: {
+        type: 'string',
+        description: 'Optional human-readable title fragment, used only for the summary line.',
+      },
+    },
+    required: ['cluster_id'],
+  },
+  async execute(input, sb) {
+    const clusterId = String(input.cluster_id ?? '')
+    if (!clusterId) return { status: 'error', summary: 'cluster_id is required' }
+    const { data, error } = await sb.raw
+      .from('inbound_clusters')
+      .update({ status: 'dismissed' })
+      .eq('id', clusterId)
+      .eq('user_id', sb.userId)
+      .select('id, title')
+      .maybeSingle()
+    if (error) return { status: 'error', summary: `couldn't dismiss cluster: ${error.message}` }
+    if (!data) return { status: 'error', summary: 'cluster not found' }
+    const label = input.title_hint || (data as any).title || 'the email thread'
+    return { status: 'ok', summary: `dismissed "${label}"`, data: { cluster_id: (data as any).id } }
+  },
+}
+
+const ALL: ToolDefinition[] = [markTaskResolved, updateTask, createReflection, correctMemory, dismissEmailCluster]
 const BY_NAME = new Map(ALL.map((t) => [t.name, t]))
 
 // Anthropic tool specs — what we send in messages.stream({ tools }).
