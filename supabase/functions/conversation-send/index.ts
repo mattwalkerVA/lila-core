@@ -125,11 +125,13 @@ Deno.serve(withErrorHandling(async (req) => {
   apiMessages.push({ role: 'user', content: contextBlock })
   apiMessages.push({ role: 'assistant', content: 'Got it. I have the current model and recent thread.' })
   for (const m of recent) {
-    if (m.role === 'system_anchor') {
-      apiMessages.push({ role: 'user', content: `[Anchor] ${m.content}` })
-    } else if (m.role === 'user' || m.role === 'assistant') {
+    if (m.role === 'user' || m.role === 'assistant') {
       apiMessages.push({ role: m.role, content: m.content })
     }
+    // system_anchor rows are omitted — the current anchor's context is
+    // already injected via the context block above. Including anchors as
+    // user messages caused consecutive same-role turns that the Anthropic
+    // API rejects, silently breaking all first replies after a bullet tap.
   }
 
   const encoder = new TextEncoder()
