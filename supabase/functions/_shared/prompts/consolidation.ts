@@ -90,6 +90,18 @@ Each item: one sentence about the thread, not to the person. "Owes a response on
 
 Things ${v.firstName} captured or committed to that have NOT moved in at least 10 calendar days, but that aren't dead. Hard rule: \`last_active_at\` must be ≥10 days before ${v.currentDate}. Compute from actual source timestamps. Do not estimate. Soft framing; a trailing question is allowed only here when it invites a decision rather than nags.
 
+## suggestions — 0 to 3
+
+Proactive next actions ${v.firstName} probably needs to take but has NOT captured yet.
+
+Rules — all must hold:
+1. A concrete unresolved situation in the input implies a specific action.
+2. That action does not already exist as a task, focus_item, or people_thread item.
+3. The action is specific enough to do immediately — "Pack FCCC camp bag" not "Prepare for camp".
+4. Zero is correct most days. Do not manufacture suggestions to fill the array.
+
+Each: \`text\` ≤10 words (imperative, no subject), \`rationale\` ≤1 sentence explaining why now, \`source_ids\` from the motivating record(s).
+
 ## greeting_context — usually null
 
 Only when something significant just shifted: returning from time away, a project just shipped, a major decision landed, a hard week ended. Most days null. When unsure, null.
@@ -107,6 +119,9 @@ Only when something significant just shifted: returning from time away, a projec
   ],
   "quiet_items": [
     { "text": "string", "source_ids": [{"table": "string", "id": "string"}], "last_active_at": "ISO 8601 date" }
+  ],
+  "suggestions": [
+    { "text": "string", "rationale": "string", "source_ids": [{"table": "string", "id": "string"}] }
   ]
 }
 \`\`\`

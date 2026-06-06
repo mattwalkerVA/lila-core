@@ -189,6 +189,37 @@ const correctMemory: ToolDefinition = {
   },
 }
 
+const createTask: ToolDefinition = {
+  name: 'create_task',
+  description:
+    'Create a new task. Use when the user asks Lila to add, create, or track something as a task — or when accepting a suggestion. Defaults to horizon layer unless the user says "today" or "this week".',
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', description: 'Task title, ≤80 chars.' },
+      layer: {
+        type: 'string',
+        enum: ['today', 'current', 'horizon'],
+        description: 'today = same day, current = this week, horizon = future/someday. Default: horizon.',
+      },
+      due_at: { type: 'string', description: 'ISO 8601 date string if a deadline was mentioned. Omit if none.' },
+      first_step: { type: 'string', description: 'Optional concrete first step.' },
+    },
+    required: ['title'],
+  },
+  async execute(input, sb) {
+    const title = String(input.title ?? '').trim()
+    if (!title) return { status: 'error', summary: 'title is required' }
+    const layer = ['today', 'current', 'horizon'].includes(input.layer) ? input.layer : 'horizon'
+    const row: Record<string, unknown> = { title, layer }
+    if (input.due_at) row.due_at = input.due_at
+    if (input.first_step) row.first_step = input.first_step
+    const { data, error } = await sb.from('tasks').insert(row).select('id, title').single()
+    if (error) return { status: 'error', summary: `couldn't create task: ${error.message}` }
+    return { status: 'ok', summary: `added "${(data as any).title}" to ${layer}`, data: { task_id: (data as any).id } }
+  },
+}
+
 const resolveCapture: ToolDefinition = {
   name: 'resolve_capture',
   description:
@@ -299,7 +330,7 @@ const fetchEmailBody: ToolDefinition = {
   },
 }
 
-const ALL: ToolDefinition[] = [markTaskResolved, updateTask, resolveCapture, createReflection, correctMemory, dismissEmailCluster, fetchEmailBody]
+const ALL: ToolDefinition[] = [createTask, markTaskResolved, updateTask, resolveCapture, createReflection, correctMemory, dismissEmailCluster, fetchEmailBody]
 const BY_NAME = new Map(ALL.map((t) => [t.name, t]))
 
 // Anthropic tool specs — what we send in messages.stream({ tools }).

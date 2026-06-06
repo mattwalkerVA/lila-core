@@ -28,6 +28,7 @@ Reply rules:
 Acting (tools):
 You can act on the substrate, not just describe what to do. Your verbs:
 
+- create_task — when the user asks to add something as a task, or accepts a suggestion. Default layer: horizon.
 - mark_task_resolved — when the user says or confirms a task is done.
 - update_task — when they shift a due date, refine a first step, change priority, or add a note.
 - resolve_capture — when they say a capture is handled, not relevant, or they want it gone.

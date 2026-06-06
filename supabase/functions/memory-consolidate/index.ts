@@ -91,6 +91,7 @@ Deno.serve(withErrorHandling(async (req) => {
       focus_items: any[]
       people_threads: any[]
       quiet_items: any[]
+      suggestions: any[]
     }>(text)
     parseSuccess = true
     output = parsed as Record<string, unknown>
@@ -107,6 +108,7 @@ Deno.serve(withErrorHandling(async (req) => {
       focus_items: parsed.focus_items ?? [],
       people_threads: parsed.people_threads ?? [],
       quiet_items: parsed.quiet_items ?? [],
+      suggestions: parsed.suggestions ?? [],
       agenda_items: agendaItems,
       generated_at: new Date().toISOString(),
     } as any, { onConflict: 'user_id' } as any)
@@ -175,17 +177,8 @@ function buildAgendaItems(inputs: ConsolidationInputs): AgendaItem[] {
     })
   }
 
-  for (const c of inputs.openClusters as Array<any>) {
-    if (!c.due_at || !c.action_needed) continue
-    const due = new Date(c.due_at)
-    if (isNaN(due.getTime()) || due.getTime() < now || due.getTime() > horizon) continue
-    items.push({
-      text: c.title,
-      date: c.due_at.slice(0, 10),
-      time: null,
-      source_ids: [{ table: 'inbound_clusters', id: c.id }],
-    })
-  }
+  // Email cluster dates are model-generated and unreliable for a schedule
+  // view — omit them. Clusters surface via focus_items instead.
 
   items.sort((a, b) => {
     const cmp = a.date.localeCompare(b.date)
