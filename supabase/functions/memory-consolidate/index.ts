@@ -64,7 +64,7 @@ Deno.serve(withErrorHandling(async (req) => {
     const sys = consolidationSystem(firstName)
     const usr = consolidationUser({
       firstName,
-      currentDate: new Date().toISOString().slice(0, 10),
+      currentDate: new Date().toLocaleDateString('en-CA', { timeZone: tz }),
       lookbackWindowDays: lookback,
       recentActivity: inputs.recentActivity,
       previousWorkingMemory: inputs.previousWorkingMemory,
