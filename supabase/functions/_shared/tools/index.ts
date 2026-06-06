@@ -186,6 +186,33 @@ const correctMemory: ToolDefinition = {
   },
 }
 
+const resolveCapture: ToolDefinition = {
+  name: 'resolve_capture',
+  description:
+    'Resolve a capture — marks it handled and removes it from the home screen. Use when the user says a captured item is done, not relevant, or they want it gone. Phrases like "that\'s handled", "delete that", "not important", "remove it", "I don\'t need that anymore".',
+  input_schema: {
+    type: 'object',
+    properties: {
+      capture_id: { type: 'string', description: 'UUID of the capture to resolve.' },
+      title_hint: { type: 'string', description: 'Optional text fragment for the summary line.' },
+    },
+    required: ['capture_id'],
+  },
+  async execute(input, sb) {
+    const captureId = String(input.capture_id ?? '')
+    if (!captureId) return { status: 'error', summary: 'capture_id is required' }
+    const { data, error } = await sb.from('captures')
+      .update({ resolved_at: new Date().toISOString() })
+      .eq('id', captureId)
+      .select('id, raw_text')
+      .maybeSingle()
+    if (error) return { status: 'error', summary: `couldn't resolve capture: ${error.message}` }
+    if (!data) return { status: 'error', summary: 'capture not found' }
+    const label = input.title_hint || ((data as any).raw_text ?? '').slice(0, 60) || 'the capture'
+    return { status: 'ok', summary: `resolved "${label}"`, data: { capture_id: (data as any).id } }
+  },
+}
+
 const dismissEmailCluster: ToolDefinition = {
   name: 'dismiss_email_cluster',
   description:
@@ -218,7 +245,7 @@ const dismissEmailCluster: ToolDefinition = {
   },
 }
 
-const ALL: ToolDefinition[] = [markTaskResolved, updateTask, createReflection, correctMemory, dismissEmailCluster]
+const ALL: ToolDefinition[] = [markTaskResolved, updateTask, resolveCapture, createReflection, correctMemory, dismissEmailCluster]
 const BY_NAME = new Map(ALL.map((t) => [t.name, t]))
 
 // Anthropic tool specs — what we send in messages.stream({ tools }).
