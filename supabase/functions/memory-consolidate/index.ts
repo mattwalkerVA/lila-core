@@ -146,6 +146,7 @@ export interface AgendaItem {
   text: string
   date: string        // YYYY-MM-DD
   time: string | null // HH:MM or null
+  is_delivery: boolean
   source_ids: Array<{ table: string; id: string }>
 }
 
@@ -173,6 +174,7 @@ function buildAgendaItems(inputs: ConsolidationInputs, tz: string): AgendaItem[]
       text: e.title,
       date,
       time,
+      is_delivery: false,
       source_ids: [{ table: 'events', id: e.id }],
     })
   }
@@ -185,6 +187,7 @@ function buildAgendaItems(inputs: ConsolidationInputs, tz: string): AgendaItem[]
       text: t.title,
       date: t.due_at.slice(0, 10),
       time: null,
+      is_delivery: false,
       source_ids: [{ table: 'tasks', id: t.id }],
     })
   }
@@ -201,6 +204,7 @@ function buildAgendaItems(inputs: ConsolidationInputs, tz: string): AgendaItem[]
       text: c.title,
       date: c.due_at.slice(0, 10),
       time: null,
+      is_delivery: c.is_delivery ?? false,
       source_ids: [{ table: 'inbound_clusters', id: c.id }],
     })
   }
@@ -240,7 +244,7 @@ async function loadInputs(userId: string, lookbackDays: number): Promise<Consoli
     sb.raw.from('inbound_clusters').select('id, title, summary, urgency, due_at, action_needed, is_scheduled, status, last_message_at').eq('user_id', userId).in('status', ['open', 'surfaced']).order('last_message_at', { ascending: false }).limit(10).then((r) => r.error ? { data: [] } : r),
     // Scheduled clusters within the agenda window — queried separately so a
     // dated event isn't dropped by the activity feed's top-10 cap.
-    sb.raw.from('inbound_clusters').select('id, title, due_at, is_scheduled, status').eq('user_id', userId).in('status', ['open', 'surfaced']).eq('is_scheduled', true).not('due_at', 'is', null).order('due_at', { ascending: true }).limit(25).then((r) => r.error ? { data: [] } : r),
+    sb.raw.from('inbound_clusters').select('id, title, due_at, is_scheduled, is_delivery, status').eq('user_id', userId).in('status', ['open', 'surfaced']).eq('is_scheduled', true).not('due_at', 'is', null).order('due_at', { ascending: true }).limit(25).then((r) => r.error ? { data: [] } : r),
   ])
 
   const recentActivity: any[] = []

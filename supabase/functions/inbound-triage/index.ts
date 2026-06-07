@@ -30,6 +30,7 @@ interface TriageCluster {
   due_at: string | null
   action_needed: boolean
   is_scheduled: boolean  // true only when due_at is a genuine event/appointment date
+  is_delivery: boolean   // true when the cluster is a shipment/package
   message_ids: string[]  // Gmail external IDs
 }
 
@@ -121,11 +122,15 @@ Deno.serve(withErrorHandling(async (req) => {
                 action_needed: { type: 'boolean' },
                 is_scheduled: {
                   type: 'boolean',
-                  description: 'true ONLY when due_at marks a genuine scheduled event or appointment that belongs on a calendar — a camp starting, a meeting, a trip, a drop-off. false for deadlines, expirations, password resets, security alerts, payment-due dates, or any administrative date. When in doubt, false.',
+                  description: 'true ONLY when due_at marks a genuine scheduled event or appointment that belongs on a calendar — a camp starting, a meeting, a trip, a drop-off, a package arriving on a known date. false for deadlines, expirations, password resets, security alerts, payment-due dates, or any administrative date. When in doubt, false.',
+                },
+                is_delivery: {
+                  type: 'boolean',
+                  description: 'true when the cluster is a shipment/package — order shipped, out for delivery, arriving, tracking update, Informed Delivery, carrier notice (USPS/UPS/FedEx/Amazon/DHL). A routine shipment with an arrival date is is_delivery=true + is_scheduled=true + action_needed=false. A delivery exception (failed, signature required, held) is is_delivery=true + action_needed=true. false for non-shipment clusters.',
                 },
                 message_ids: { type: 'array', items: { type: 'string' } },
               },
-              required: ['cluster_key', 'title', 'summary', 'urgency', 'due_at', 'action_needed', 'is_scheduled', 'message_ids'],
+              required: ['cluster_key', 'title', 'summary', 'urgency', 'due_at', 'action_needed', 'is_scheduled', 'is_delivery', 'message_ids'],
             },
           },
         },
@@ -187,6 +192,7 @@ Deno.serve(withErrorHandling(async (req) => {
           due_at: cluster.due_at ?? null,
           action_needed: cluster.action_needed,
           is_scheduled: cluster.is_scheduled ?? false,
+          is_delivery: cluster.is_delivery ?? false,
           message_ids: dbMessageIds,
           last_message_at: lastMessageAt,
           // first_seen_at is set only on insert (handled by DB default or we preserve it)

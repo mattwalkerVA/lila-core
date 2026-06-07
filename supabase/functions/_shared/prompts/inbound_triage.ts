@@ -33,6 +33,8 @@ For each cluster:
 - \`urgency\`: 0–1 float. 0.9+ = time-sensitive action required within days. 0.5 = notable but no immediate deadline. 0.2 = FYI.
 - \`due_at\`: ISO 8601 date if and only if a concrete date appears in the message text. Never invent one. null if no date is present.
 - \`action_needed\`: true only if the user genuinely owes a response, decision, payment, or physical action. A newsletter, a FYI, a receipt — false.
+- \`is_scheduled\`: true ONLY when \`due_at\` marks a genuine scheduled event or appointment that belongs on a calendar — a camp starting, a meeting, a trip, a drop-off, **a package arriving on a known date**. false for deadlines, expirations, password resets, security alerts, payment-due dates, or any administrative date. When in doubt, false.
+- \`is_delivery\`: true when the cluster is a shipment or package — order shipped, out for delivery, arriving, tracking update, Informed Delivery, carrier notice (USPS/UPS/FedEx/Amazon/DHL). A routine "your order shipped" with an expected date is \`is_delivery: true\`, \`is_scheduled: true\`, \`action_needed: false\`. A delivery **exception** (failed delivery, signature required, held at facility, address problem) is \`is_delivery: true\`, \`action_needed: true\`. Non-shipment clusters: false.
 - \`message_ids\`: array of the \`id\` fields (Gmail external IDs) of the constituent messages.
 
 ## Push bar
@@ -52,6 +54,8 @@ Return a JSON object with this shape. No markdown fences. No prose.
       "urgency": 0.0,
       "due_at": "YYYY-MM-DD or null",
       "action_needed": false,
+      "is_scheduled": false,
+      "is_delivery": false,
       "message_ids": ["gmail-external-id-1", "gmail-external-id-2"]
     }
   ]
