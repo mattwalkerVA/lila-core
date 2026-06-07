@@ -46,8 +46,12 @@ See [`prompts/working-memory/`](./prompts/working-memory/) and
 ### 2. Attention itself
 
 The runtime that uses that memory to notice without being asked.
-Working memory becomes the home screen. Tapping a bullet anchors a
-conversation. A proactive scan runs after every consolidation and
+Working memory becomes the home screen — focus items, a date-sorted
+agenda, and proactive suggestions Lila infers from what she can see.
+Tapping a bullet anchors a conversation, where Lila can act on the
+substrate through tools (create/resolve tasks, dismiss email clusters,
+fetch full email bodies, correct memory) rather than just describing
+what to do. A proactive scan runs after every consolidation and
 queues push candidates that get delivered on the user's clock — not
 the engagement-loop's. No streaks. No daily-active manipulation. The
 model is the product.
@@ -74,6 +78,7 @@ supabase/
     http.ts                            CORS, JSON, error mapping.
     json.ts                            Robust JSON extraction from model responses.
     apns.ts                            APNs HTTP/2 helper for the proactive layer.
+    tools/index.ts                     Conversation tool-use verbs (create/resolve task, dismiss cluster, fetch email body, correct memory).
     prompts/
       classify.ts                      Capture type classifier (Haiku).
       shape_task.ts / shape_note.ts /
@@ -90,17 +95,21 @@ supabase/
     capture-distill-memory/            POST /capture/distill-memory
     capture-extract-tasks/             POST /capture/extract-tasks
     capture-summarize-url/             POST /capture/summarize-url
-    memory-consolidate/                POST /memory/consolidate
+    memory-consolidate/                POST /memory/consolidate        (also builds agenda_items + suggestions)
     memory-refresh/                    POST /memory/refresh            (manual trigger)
     memory-proactive-scan/             POST /memory/proactive-scan     (chained from consolidate)
-    conversation-send/                 POST /conversation/send         (SSE streaming)
+    memory-retrieve/                   POST /memory/retrieve           (semantic recall for conversation)
+    conversation-send/                 POST /conversation/send         (SSE streaming; tool-use loop)
     conversation-anchor/               POST /conversation/anchor       (seed from a tapped bullet)
     connectors-calendar-sync/          POST /connectors/calendar/sync  (called from iOS EventKit)
     connectors-gmail-sync/             Cron, every 15 min — server-side Gmail pull (1.1).
     connectors-gmail-oauth/            POST /connectors/gmail/oauth    — code→token exchange (1.1).
+    connectors-google-calendar-sync/   Cron, every 30 min — server-side Google Calendar pull (1.1).
+    connectors-google-calendar-oauth/  POST — Google Calendar code→token exchange (1.1).
     inbound-triage/                    POST /inbound-triage            — cluster + judge Gmail messages (1.1).
     push-register/                     POST /push/register             (APNs token)
     push-test/                         POST /push/test                 (dev only)
+    account-delete/                    POST /account/delete            (full user-data deletion)
     proactive-deliver/                 Cron, every 5 min — drains proactive_events queue.
     proactive-morning-brief/           Cron, hourly — generates morning brief candidates.
     proactive-calendar-imminent/       Cron, every 15 min — scans for events 15-30 min ahead.
@@ -174,10 +183,20 @@ are implemented in this repo (`src/connectors/gmail/`,
 `connectors-gmail-sync`, `connectors-gmail-oauth`, `inbound-triage`).
 Activation requires the lila-ios migrations (`connector_accounts`,
 `inbound_messages`, `inbound_clusters`) and the iOS OAuth connect flow.
+Triage clusters messages and tags each one (`is_scheduled`, `is_delivery`,
+`action_needed`) so dated events flow to the agenda, deliveries get their
+own treatment, and only genuine action items compete for focus.
 See [`PROACTIVE_EMAIL.md`](./PROACTIVE_EMAIL.md) and
 [`ADR/ADR-003`](./ADR/ADR-003-proactive-email-ingest.md).
 
-Google Calendar and Reminders remain deferred to 1.1+.
+**1.1 — Google Calendar (server-side pull).** Implemented alongside Gmail
+(`src/connectors/google-calendar/`, `connectors-google-calendar-sync`,
+`connectors-google-calendar-oauth`). Native iOS OAuth (reversed-client-ID
+redirect, no client secret); the same iOS Google client serves both Gmail
+and Calendar scopes. Events reconcile into the `events` table on a 30-minute
+cron, deduped on `(user_id, connector, external_id)` like Apple Calendar.
+
+Reminders remain deferred to 1.1+.
 
 ## Reading order, if you're forking
 
