@@ -11,6 +11,7 @@
 
 import { adminSupabase, HttpError } from '../_shared/scopedSupabase.ts'
 import { withErrorHandling, jsonResponse, hasServiceRole } from '../_shared/http.ts'
+import { formatLocalTime } from '../_shared/time.ts'
 
 Deno.serve(withErrorHandling(async (req) => {
   const auth = req.headers.get('authorization') ?? ''
@@ -30,6 +31,16 @@ Deno.serve(withErrorHandling(async (req) => {
     .is('resolved_at', null)
   if (!events || events.length === 0) return jsonResponse({ scheduled: 0 })
 
+  // Load each affected user's timezone once so event times render locally.
+  const userIds = [...new Set(events.map((e) => e.user_id))]
+  const { data: profiles } = await adminSupabase
+    .from('profiles')
+    .select('id, timezone')
+    .in('id', userIds)
+  const tzByUser = new Map<string, string>(
+    (profiles ?? []).map((p: any) => [p.id, p.timezone ?? 'UTC']),
+  )
+
   let scheduled = 0
   for (const ev of events) {
     const sub = `calendar_imminent_${ev.id}`
@@ -42,8 +53,7 @@ Deno.serve(withErrorHandling(async (req) => {
       .maybeSingle()
     if (existing) continue
 
-    const startLocal = new Date(ev.start_at)
-    const time = `${startLocal.getUTCHours().toString().padStart(2, '0')}:${startLocal.getUTCMinutes().toString().padStart(2, '0')}`
+    const time = formatLocalTime(ev.start_at, tzByUser.get(ev.user_id))
     const titleSuffix = ev.title || 'event'
     const where = ev.location ? ` at ${ev.location}` : ''
     const body = `${time} — ${titleSuffix}${where}.`

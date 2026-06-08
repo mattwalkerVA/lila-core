@@ -55,12 +55,14 @@ Deno.serve(withErrorHandling(async (req) => {
   for (const [userId, queue] of byUser) {
     queue.sort((a, b) => (CATEGORY_PRIORITY[a.category] ?? 99) - (CATEGORY_PRIORITY[b.category] ?? 99))
 
-    const [{ data: pref }, { data: deliveredToday }] = await Promise.all([
+    const [{ data: pref }, { data: deliveredToday }, { data: profile }] = await Promise.all([
       adminSupabase.from('notification_preferences').select('*').eq('user_id', userId).single(),
       adminSupabase.from('proactive_events').select('id, category, delivered_at')
         .eq('user_id', userId)
         .gte('delivered_at', new Date(Date.now() - 24 * 3600_000).toISOString()),
+      adminSupabase.from('profiles').select('timezone').eq('id', userId).single(),
     ])
+    const tz = profile?.timezone ?? 'UTC'
 
     if (!pref?.push_token) {
       // No registered device — leave them in the queue, suppress oldest if it's stale (>3 days).
@@ -77,7 +79,7 @@ Deno.serve(withErrorHandling(async (req) => {
     const dailyByCat = countBy(deliveredToday ?? [], (r: any) => r.category)
 
     for (const cand of queue) {
-      const reason = decideSuppression(cand, pref, dailyCount, dailyByCat, now)
+      const reason = decideSuppression(cand, pref, dailyCount, dailyByCat, now, tz)
       if (reason) {
         await markSuppressed(cand.id, reason)
         suppressed++
@@ -121,6 +123,7 @@ function decideSuppression(
   dailyCount: number,
   dailyByCat: Record<string, number>,
   now: Date,
+  tz: string,
 ): string | null {
   if (dailyCount >= HARD_DAILY_CAP) return 'rate_limit_daily'
 
@@ -141,23 +144,28 @@ function decideSuppression(
   if (cand.category === 'high_confidence' && !pref.high_confidence_enabled) return 'category_disabled'
   if (cand.category === 'drift') return 'drift_disabled_in_1_0'
 
-  // Quiet hours (uses local time approximation; profile timezone would be more correct).
-  if (insideQuietHours(now, pref.quiet_hours_start, pref.quiet_hours_end)) {
+  // Quiet hours, compared in the user's timezone.
+  if (insideQuietHours(now, pref.quiet_hours_start, pref.quiet_hours_end, tz)) {
     return 'quiet_hours'
   }
 
   return null
 }
 
-function insideQuietHours(now: Date, startStr: string | null, endStr: string | null): boolean {
+function insideQuietHours(now: Date, startStr: string | null, endStr: string | null, tz: string): boolean {
   if (!startStr || !endStr) return false
-  // Treat the strings as UTC time-of-day; this is a known simplification.
-  // Per-user timezone awareness is on the 1.1 list.
   const minutes = (s: string) => {
     const [h, m] = s.split(':').map(Number)
     return h * 60 + (m ?? 0)
   }
-  const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes()
+  // Compare against the user's local wall-clock, not UTC.
+  const local = now.toLocaleTimeString('sv-SE', {
+    timeZone: tz || 'UTC',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  const [nh, nm] = local.split(':').map(Number)
+  const nowMin = nh * 60 + nm
   const start = minutes(startStr)
   const end = minutes(endStr)
   if (start < end) return nowMin >= start && nowMin < end

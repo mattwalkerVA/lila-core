@@ -16,6 +16,7 @@ import { withErrorHandling, jsonResponse, readJson, hasServiceRole } from '../_s
 import { anthropic, MODELS } from '../_shared/client.ts'
 import { consolidationSystem, consolidationUser, ConsolidationVars } from '../_shared/prompts/consolidation.ts'
 import { parseJsonObject } from '../_shared/json.ts'
+import { localDateParts, localToday } from '../_shared/time.ts'
 
 interface Body {
   user_id?: string
@@ -64,7 +65,7 @@ Deno.serve(withErrorHandling(async (req) => {
     const sys = consolidationSystem(firstName)
     const usr = consolidationUser({
       firstName,
-      currentDate: new Date().toLocaleDateString('en-CA', { timeZone: tz }),
+      currentDate: localToday(tz),
       lookbackWindowDays: lookback,
       recentActivity: inputs.recentActivity,
       previousWorkingMemory: inputs.previousWorkingMemory,
@@ -148,17 +149,6 @@ export interface AgendaItem {
   time: string | null // HH:MM or null
   is_delivery: boolean
   source_ids: Array<{ table: string; id: string }>
-}
-
-// Convert a UTC ISO string to local wall-clock date and time using the
-// user's stored timezone. sv-SE locale gives "YYYY-MM-DD HH:MM:SS" format.
-function localDateParts(utcString: string, tz: string): { date: string; time: string | null } {
-  const d = new Date(utcString)
-  if (isNaN(d.getTime())) return { date: utcString.slice(0, 10), time: null }
-  const local = d.toLocaleString('sv-SE', { timeZone: tz })
-  const [date, timeWithSeconds] = local.split(' ')
-  const time = utcString.length > 10 ? timeWithSeconds.slice(0, 5) : null
-  return { date, time }
 }
 
 function buildAgendaItems(inputs: ConsolidationInputs, tz: string): AgendaItem[] {

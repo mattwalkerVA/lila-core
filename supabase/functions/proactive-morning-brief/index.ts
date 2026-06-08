@@ -9,6 +9,7 @@ import { withErrorHandling, jsonResponse, hasServiceRole } from '../_shared/http
 import { anthropic, MODELS } from '../_shared/client.ts'
 import { morningBriefSystem, morningBriefUser } from '../_shared/prompts/morning_brief.ts'
 import { parseJsonObject } from '../_shared/json.ts'
+import { formatLocalTime12, localToday } from '../_shared/time.ts'
 
 Deno.serve(withErrorHandling(async (req) => {
   const auth = req.headers.get('authorization') ?? ''
@@ -24,10 +25,22 @@ Deno.serve(withErrorHandling(async (req) => {
     .eq('morning_brief_enabled', true)
   if (!candidates || candidates.length === 0) return jsonResponse({ scheduled: 0 })
 
+  // Each user's brief time is in their local zone — load timezones up front
+  // so the window check compares against local wall-clock, not UTC.
+  const userIds = candidates.map((c) => c.user_id)
+  const { data: tzProfiles } = await adminSupabase
+    .from('profiles')
+    .select('id, timezone')
+    .in('id', userIds)
+  const tzByUser = new Map<string, string>(
+    (tzProfiles ?? []).map((p: any) => [p.id, p.timezone ?? 'UTC']),
+  )
+
   let scheduled = 0
   for (const c of candidates) {
     if (!c.push_token) continue
-    if (!isWithinWindow(now, c.morning_brief_time)) continue
+    const tz = tzByUser.get(c.user_id) ?? 'UTC'
+    if (!isWithinWindow(now, c.morning_brief_time, tz)) continue
 
     // Look up profile + working memory + today's events.
     const [{ data: profile }, { data: wm }, { data: events }] = await Promise.all([
@@ -48,7 +61,7 @@ Deno.serve(withErrorHandling(async (req) => {
       system: [{ type: 'text', text: morningBriefSystem(firstName), cache_control: { type: 'ephemeral' } }],
       messages: [{
         role: 'user',
-        content: morningBriefUser(JSON.stringify(wm ?? {}, null, 2), JSON.stringify(events ?? [], null, 2), now.toISOString()),
+        content: morningBriefUser(JSON.stringify(wm ?? {}, null, 2), JSON.stringify(events ?? [], null, 2), `${localToday(tz)} ${formatLocalTime12(now.toISOString(), tz)}`),
       }],
     })
     const text = (r.content[0] as any).text as string
@@ -68,15 +81,20 @@ Deno.serve(withErrorHandling(async (req) => {
   return jsonResponse({ scheduled })
 }))
 
-// True if `now` is within ~10 minutes after the user's brief time. The
-// hourly cron means we sweep every user once per hour and catch them in
-// their window. Timezone awareness is approximated as UTC for 1.0; users
-// in non-UTC zones get a brief at their UTC-local equivalent. Spec §9.2
-// notes this as a known gap to fix in 1.1.
-function isWithinWindow(now: Date, briefTime: string | null): boolean {
+// True if `now` is within ~10 minutes after the user's brief time, compared
+// in the user's own timezone. The hourly cron sweeps every user once per
+// hour and catches them in their local window.
+function isWithinWindow(now: Date, briefTime: string | null, tz: string): boolean {
   if (!briefTime) return false
   const [h, m] = briefTime.split(':').map(Number)
-  const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes()
+  // "HH:MM" wall-clock in the user's zone.
+  const local = now.toLocaleTimeString('sv-SE', {
+    timeZone: tz || 'UTC',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  const [nh, nm] = local.split(':').map(Number)
+  const nowMin = nh * 60 + nm
   const target = h * 60 + (m ?? 0)
   const diff = nowMin - target
   return diff >= 0 && diff <= 10
