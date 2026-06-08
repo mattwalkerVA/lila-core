@@ -8,16 +8,21 @@ Anything below 1.2 is intent, not commitment.
 - Two primitives running end-to-end: memory persistence (consolidation,
   source receipts, working memory) and attention (proactive scan, morning
   brief, calendar imminent).
-- 17 Edge Functions covering capture, memory, conversation, connectors,
+- 23 Edge Functions covering capture, memory, conversation, connectors,
   push.
-- Apple Calendar via EventKit. No other connectors.
+- Working memory renders three surfaces: focus items, a date-sorted
+  agenda (`agenda_items`, built mechanically), and proactive suggestions
+  (`suggestions`, model-generated).
+- Connectors: Apple Calendar (EventKit), Google Calendar (server-side
+  pull, native iOS OAuth), and Gmail (server-side pull + triage).
 - One conversation per user, ever (DB-enforced).
-- Conversation tool-use loop for low-risk substrate actions, with audit
+- Conversation tool-use loop for low-risk substrate actions (create/resolve
+  task, dismiss cluster, fetch email body, correct memory), with audit
   receipts persisted on assistant messages.
 - Working-memory golden-set eval harness for source receipts, quiet-item
   age, voice drift, and structural regressions.
-- Forward-compatible vector(1024) columns; no semantic retrieval at
-  runtime.
+- Forward-compatible vector(1024) columns; lexical retrieval wired behind
+  a feature flag, vector backfill scripted.
 
 ## 1.1 — next
 
@@ -28,19 +33,14 @@ Anything below 1.2 is intent, not commitment.
 - **Tool use expansion.** The loop exists for low-risk substrate verbs.
   Next is undo, snooze, richer update summaries, and eval coverage for
   tool-selection mistakes.
-- **Google Calendar OAuth.** First non-Apple connector. Reuses the
-  `events` table and the existing reconciliation pattern. The OAuth
-  exchange lives in a new `connectors-google-calendar-*` function tree.
-- **Proactive email.** Server-side Gmail pull → cluster related messages
-  → a new `important_inbound` push category that fires only for dated,
-  action-needed clusters; everything else surfaces on the home screen.
-  Design in [PROACTIVE_EMAIL.md](./PROACTIVE_EMAIL.md), decisions in
-  [ADR-003](./ADR/ADR-003-proactive-email-ingest.md).
-- **Vector retrieval over conversation history.** When `conversation_messages`
-  passes ~500 rows for a given user, the 20-message window stops
-  carrying enough. Backfill embeddings on a one-time migration; flip a
-  feature flag in `conversation-send` to use vector search alongside the
-  recency window.
+- **Inbound eval goldens.** The Gmail connector shipped without a golden
+  set for triage (clustering, `is_scheduled`/`is_delivery`/`action_needed`
+  classification, no-alert fixtures). Add these to match the working-memory
+  harness's coverage.
+- **Vector retrieval over conversation history.** Lexical retrieval and the
+  `memory_accesses` audit log are wired behind `LILA_MEMORY_RETRIEVAL_ENABLED`;
+  vector backfill is scripted. Next: flip vector search on by default in
+  `conversation-send` once `conversation_messages` volume warrants it.
 
 ## 1.2 — likely
 

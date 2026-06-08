@@ -1,9 +1,14 @@
 # Proactive email — design
 
-> Status: **proposed** (design only, no runtime code yet). Companion to
-> [ADR-003](./ADR/ADR-003-proactive-email-ingest.md). This is the doc you
-> read before building the Gmail connector and the `important_inbound`
-> category.
+> Status: **implemented**. Companion to
+> [ADR-003](./ADR/ADR-003-proactive-email-ingest.md). This documents the
+> design behind the shipped Gmail connector and the `important_inbound`
+> category. Runtime code: `src/connectors/gmail/`, `connectors-gmail-sync`,
+> `connectors-gmail-oauth`, `inbound-triage`. One change from the original
+> design: triage runs via Anthropic tool-use (not free-form JSON) and tags
+> each cluster with `is_scheduled` (genuine calendar event) and
+> `is_delivery` (shipment/package) in addition to `action_needed`, so dated
+> events flow to the agenda and deliveries get their own treatment.
 
 ## The ask, in one sentence
 

@@ -18,7 +18,7 @@ in the codebase is either part of one or part of the other.
                 ┌─────────────────────┐
                 │     postgres        │  captures, tasks, notes,
                 │                     │  reflections, memories,
-                │   (memory layer)    │  events, messages, …
+                │   (memory layer)    │  events, inbound_clusters, …
                 └──────────┬──────────┘
                            │  recent window (RLS-scoped)
                            ▼
@@ -85,12 +85,19 @@ schema to emit at least one source per bullet
 ([`supabase/functions/memory-consolidate`](./supabase/functions/memory-consolidate/))
 runs nightly per user (and on-demand via `POST /memory/refresh`). It
 reads a bounded recent window from `captures`, `tasks`, `events`,
-`messages`, `notes`, and `reflections`; folds in any long-term
+`notes`, `reflections`, and `inbound_clusters`; folds in any long-term
 distilled memories; passes the assembled context to Sonnet using the
 prompt at
 [`_shared/prompts/consolidation.ts`](./supabase/functions/_shared/prompts/consolidation.ts);
 parses and schema-validates the response; writes a single row to the
 `working_memory` table.
+
+The written row carries `focus_items`, `people_threads`, and `quiet_items`
+(model-generated), plus two fields added after the initial spec:
+`agenda_items` — a date-sorted list of upcoming events, dated tasks, and
+`is_scheduled` email clusters, built **mechanically** (no model, no
+hallucinated dates) — and `suggestions` — 0–3 proactive next actions the
+model infers from situations that have no matching task yet.
 
 There is **one row per user** in `working_memory`. The home screen is
 never reading a feed of past consolidations. It reads the current one.
@@ -126,6 +133,15 @@ The system prompt for the conversation is at
 The voice rules at
 [`_shared/voice.ts`](./supabase/functions/_shared/voice.ts) are imported
 into every Sonnet prompt — voice is one source of truth.
+
+`conversation-send` runs a multi-turn **tool-use loop**: mid-reply, Lila
+can act on the substrate through verbs defined in
+[`_shared/tools/index.ts`](./supabase/functions/_shared/tools/index.ts) —
+`create_task`, `mark_task_resolved`, `update_task`, `resolve_capture`,
+`create_reflection`, `correct_memory`, `dismiss_email_cluster`, and
+`fetch_email_body`. Each call is RLS-scoped and persisted on the assistant
+message as an audit receipt, so a user can see exactly what Lila changed.
+Higher-stakes verbs (send, delete) stay behind explicit UI, not the model.
 
 ### 3. Proactive layer
 
@@ -172,7 +188,9 @@ identifiers and cache settings live in one place.
   `scopedSupabase` to drop privileges to the user's row scope before
   reading or writing.
 - The iOS client authenticates with a Supabase user JWT; it cannot
-  reach service-role endpoints directly.
+  reach service-role endpoints directly. Cron-only functions gate on
+  `hasServiceRole()` ([`_shared/http.ts`](./supabase/functions/_shared/http.ts)),
+  which decodes the JWT `role` claim rather than string-matching a raw key.
 - APNs credentials, the Anthropic key, and the service role key live
   in Edge Function secrets. Nothing in this repo's `.env.example`
   contains live values.
@@ -182,13 +200,14 @@ identifiers and cache settings live in one place.
 The 1.0 spec is explicit on a few things, and those are documented as
 ADRs in [`ADR/`](./ADR/):
 
-- No pgvector retrieval ([ADR-001](./ADR/ADR-001-no-pgvector-in-1.0.md))
+- No pgvector retrieval at runtime ([ADR-001](./ADR/ADR-001-no-pgvector-in-1.0.md));
+  lexical retrieval is wired behind `LILA_MEMORY_RETRIEVAL_ENABLED`
 - One continuous conversation per user, not session-based chat
   ([ADR-002](./ADR/ADR-002-one-continuous-conversation.md))
 - No Railway, no long-running Node processes — Edge Functions are the
   runtime
-- Apple Calendar via EventKit only — Google Calendar and Gmail are
-  deferred to 1.1+
+- Reminders / third-party task apps deferred to 1.1+ (Apple Calendar,
+  Google Calendar, and Gmail connectors all ship in 1.0)
 
 When in doubt, the spec prefers fewer moving parts shipping cleanly
 over more moving parts shipping noisy.

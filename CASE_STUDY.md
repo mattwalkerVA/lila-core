@@ -70,8 +70,8 @@ The Edge Function loads:
 - Last 20 conversation messages (none).
 
 It composes the consolidation prompt — system prompt is voice rules
-(`agent/voice.ts`) + the consolidation instruction set
-(`prompts/consolidation.ts`); user prompt is the rendered context. It
+(`_shared/voice.ts`) + the consolidation instruction set
+(`_shared/prompts/consolidation.ts`); user prompt is the rendered context. It
 calls Sonnet with `cache_control: ephemeral` on the system block so
 subsequent runs hit the prompt cache.
 

@@ -68,14 +68,14 @@ This is the JSON the consolidation writes back to the
         {
           "text": "Bathroom tile decision still open — she sent two options Sunday, you didn't reply.",
           "source_ids": [
-            { "table": "messages", "id": "msg_2bc009" },
+            { "table": "inbound_clusters", "id": "clu_2bc009" },
             { "table": "captures", "id": "cap_f10aa1" }
           ]
         },
         {
           "text": "Weekend with her parents — she's leaning yes, you said you'd think about it.",
           "source_ids": [
-            { "table": "messages", "id": "msg_77df21" }
+            { "table": "inbound_clusters", "id": "clu_77df21" }
           ]
         }
       ]
@@ -97,8 +97,8 @@ This is the JSON the consolidation writes back to the
 ## How it was produced
 
 The consolidation ran at 3am the user's local time. It read the recent
-windows of the `captures`, `tasks`, `events`, `messages`, `notes`, and
-`reflections` tables — RLS-scoped to the single user. It applied the
+windows of the `captures`, `tasks`, `events`, `notes`, `reflections`, and
+`inbound_clusters` tables — RLS-scoped to the single user. It applied the
 voice rules in
 [`supabase/functions/_shared/voice.ts`](./supabase/functions/_shared/voice.ts)
 and the structure prompt in
@@ -108,6 +108,13 @@ Output was validated against
 written into the `working_memory` row for that user, and chained
 straight into the proactive scan, which decided not to push anything
 this morning — the IEP meeting is still 36 hours out.
+
+The row shown above focuses on `focus_items`, `people_threads`, and
+`quiet_items`. The same row also carries two fields omitted here for
+brevity: `agenda_items` (a date-sorted list of upcoming events, dated
+tasks, and `is_scheduled` email clusters, assembled mechanically — no
+model, so no invented dates) and `suggestions` (0–3 proactive next
+actions the model infers from situations with no matching task yet).
 
 ## Why source receipts matter
 

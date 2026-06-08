@@ -1,6 +1,6 @@
 # ADR-003 — Proactive email ingest via server-side Gmail pull
 
-**Status:** Proposed · **Date:** 2026-06
+**Status:** Accepted (implemented) · **Date:** 2026-06
 
 ## Context
 
